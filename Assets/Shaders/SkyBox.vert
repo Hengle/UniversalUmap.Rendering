@@ -22,6 +22,7 @@ void main()
     
     vec4 worldPosition = viewMatrixWithoutTranslation * vec4(inPosition, 1.0);
     gl_Position = camera.projection * worldPosition;
+    gl_Position.z = gl_Position.w;
     
     fragPosition = inPosition;
 }

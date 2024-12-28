@@ -40,7 +40,7 @@ public class Component : IDisposable
         InstanceCount = 1;
         
         Mesh = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Mesh(GraphicsDevice, CommandList, ModelPipeline, staticMesh, [staticMesh.LODs[0].Sections.Value[0].Material]));
-        TwoSided = Mesh.isTwoSided;
+        TwoSided = Mesh.IsTwoSided;
     }
     
     public Component(ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] originalTransforms, UObject[] overrideMaterials)
@@ -53,12 +53,12 @@ public class Component : IDisposable
         OverrideMaterials = new Material[overrideMaterials.Length];
         for (var i = 0; i < OverrideMaterials.Length; i++)
             if (overrideMaterials[i] != null)
-                OverrideMaterials[i] = ResourceCache.GetOrAdd(overrideMaterials[i].Outer!.Name, ()=> new Material(graphicsDevice, commandList, ModelPipeline.TextureResourceLayout, overrideMaterials[i]));
+                OverrideMaterials[i] = ResourceCache.GetOrAdd(overrideMaterials[i].Outer!.Name, ()=> new Material(graphicsDevice, commandList, ModelPipeline.MaterialResourceLayout, overrideMaterials[i]));
         
         staticMesh.TryConvert(out CStaticMesh convertedMesh);
         Mesh = ResourceCache.GetOrAdd(staticMesh.Outer!.Name, ()=> new Mesh(GraphicsDevice, CommandList, ModelPipeline, convertedMesh, staticMesh.Materials));
         
-        TwoSided = component.Outer!.GetOrDefault<bool>("bMirrored") || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance") || Mesh.isTwoSided;
+        TwoSided = component.Outer!.GetOrDefault<bool>("bMirrored") || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance") || Mesh.IsTwoSided;
         
         VisibleTransforms = new InstanceInfo[originalTransforms.Length];
         Transforms = new InstanceInfo[originalTransforms.Length];
@@ -97,7 +97,7 @@ public class Component : IDisposable
         
         CommandList.SetGraphicsResourceSet(0, ModelPipeline.AutoTextureResourceSet);
         CommandList.SetGraphicsResourceSet(1, CameraResourceSet);
-        CommandList.SetGraphicsResourceSet(2, ModelPipeline.TextureSamplerResourceSet);
+        CommandList.SetGraphicsResourceSet(2, ModelPipeline.CubeMapAndSamplerResourceSet);
         CommandList.SetVertexBuffer(1, TransformBuffer);
         
         Mesh.Render();

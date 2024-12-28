@@ -14,7 +14,7 @@ public class Camera
         AspectRatio = aspectRatio;
         FrustumPlanes = new Plane[6];
         Fov = 90f;
-        Far = 10000000f;
+        Far = 1000000f;
         Near = 10f;
         MouseSpeed = 1f;
         FlySpeed = 1f;
@@ -34,7 +34,6 @@ public class Camera
     private float FlySpeed;
     
     private float AspectRatio;
-    private Vector4 FrontVector => new(Vector3.Normalize(DirectionArc), 0f);
     private Matrix4x4 ViewMatrix => Matrix4x4.CreateLookAt(Position, Direction, Up);
     private Matrix4x4 ProjectionMatrix => Matrix4x4.CreatePerspectiveFieldOfView(Fov * (float)Math.PI / 180f, AspectRatio, Near, Far);
     private Matrix4x4 ViewProjectionMatrix => ViewMatrix * ProjectionMatrix;
@@ -46,7 +45,7 @@ public class Camera
 
         Modify(deltaTime);
         CalculateFrustum();
-        return new CameraUniform(ProjectionMatrix, ViewMatrix, FrontVector);
+        return new CameraUniform(ProjectionMatrix, ViewMatrix, Position);
     }
 
     private void CalculateFrustum()

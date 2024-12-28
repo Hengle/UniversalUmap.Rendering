@@ -15,15 +15,6 @@ public class Material
     private readonly GraphicsDevice GraphicsDevice;
     private readonly CommandList CommandList;
     
-    private Texture Color;
-    private Texture Metallic;
-    private Texture Specular;
-    private Texture Roughness;
-    private Texture AO;
-    private Texture Normal;
-    private Texture Alpha;
-    private Texture Emissive;
-
     public bool TwoSided = false;
     private EBlendMode BlendMode = EBlendMode.BLEND_Opaque;
     private EMaterialShadingModel ShadingModel = EMaterialShadingModel.MSM_DefaultLit;
@@ -35,21 +26,26 @@ public class Material
     private readonly Dictionary<string, UTexture> Textures = new();
     private readonly Dictionary<string, UTexture> ReferenceTextures = new();
     
-    public Material(GraphicsDevice graphicsDevice, CommandList commandList, ResourceLayout textureResourceLayout, UObject material)
+    private readonly ResourceSet ResourceSet;
+    
+    public Material(GraphicsDevice graphicsDevice, CommandList commandList, ResourceLayout materialResourceLayout, UObject material)
     {
         GraphicsDevice = graphicsDevice;
         CommandList = commandList;
         
         LoadUMaterial(material);
         
-        Color = FindTexture(textureResourceLayout, nameof(Color), new Vector4(0.18f));
-        Metallic = FindTexture(textureResourceLayout, nameof(Metallic), Vector4.Zero);
-        Specular = FindTexture(textureResourceLayout, nameof(Specular), new Vector4(0.5f));
-        Roughness = FindTexture(textureResourceLayout, nameof(Roughness), new Vector4(0.5f));
-        AO = FindTexture(textureResourceLayout, nameof(AO), Vector4.One);
-        Normal = FindTexture(textureResourceLayout, nameof(Normal), new Vector4(0.5f, 0.5f, 1, 1));
-        Alpha = FindTexture(textureResourceLayout, nameof(Alpha), Vector4.One);
-        Emissive = FindTexture(textureResourceLayout, nameof(Emissive), Vector4.Zero);
+        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(
+            materialResourceLayout,
+            FindTexture("Color", new Vector4(0.18f)).VeldridTexture,
+            FindTexture("Metallic", new Vector4(0.0f)).VeldridTexture,
+            FindTexture("Specular", new Vector4(0.5f)).VeldridTexture,
+            FindTexture("Roughness", new Vector4(0.8f)).VeldridTexture,
+            FindTexture("AO", new Vector4(1.0f)).VeldridTexture,
+            FindTexture("Normal", new Vector4(0.5f, 0.5f, 1, 1)).VeldridTexture,
+            FindTexture("Alpha", new Vector4(1.0f)).VeldridTexture,
+            FindTexture("Emissive", new Vector4(0.0f)).VeldridTexture
+        ));
         
         Textures.Clear();
         ReferenceTextures.Clear();
@@ -192,7 +188,7 @@ public class Material
             AddOrSkipProperty(dict, parameterInfos[i].Name.Text, parameterValues[i]);
     }
 
-    private Texture FindTexture(ResourceLayout textureResourceLayout, string parameterName, Vector4 defaultColor)
+    private Texture FindTexture(string parameterName, Vector4 defaultColor)
     {
         var item = RenderContext.AutoTextureItems.FirstOrDefault(item => item.Parameter == parameterName);
         if (item != null && !string.IsNullOrWhiteSpace(item.Name))
@@ -203,28 +199,21 @@ public class Material
                 var blacklist = string.IsNullOrWhiteSpace(item.Blacklist) ? new Regex(".^$") : new Regex(item.Blacklist, RegexOptions.IgnoreCase);
                 foreach (var texParam in Textures)
                     if (names.IsMatch(texParam.Key) && !blacklist.IsMatch(texParam.Key))
-                        return ResourceCache.GetOrAdd(texParam.Value.Owner!.Name, () => new Texture(GraphicsDevice, textureResourceLayout, texParam.Value));
+                        return ResourceCache.GetOrAdd(texParam.Value.Owner!.Name, () => new Texture(GraphicsDevice, texParam.Value));
                 foreach (var texParam in ReferenceTextures)
                     if (names.IsMatch(texParam.Key) && !blacklist.IsMatch(texParam.Key))
-                        return ResourceCache.GetOrAdd(texParam.Value.Owner!.Name, () => new Texture(GraphicsDevice, textureResourceLayout, texParam.Value));
+                        return ResourceCache.GetOrAdd(texParam.Value.Owner!.Name, () => new Texture(GraphicsDevice, texParam.Value));
             }
             catch (Exception e)
             {
                 // ignored
             }
         }
-        return ResourceCache.GetOrAdd("Fallback_" + parameterName, ()=> new Texture(GraphicsDevice, textureResourceLayout, defaultColor));
+        return ResourceCache.GetOrAdd("Fallback_" + parameterName, ()=> new Texture(GraphicsDevice, defaultColor));
     }
 
     public void Render()
     {
-        CommandList.SetGraphicsResourceSet(3, Color.ResourceSet);
-        CommandList.SetGraphicsResourceSet(4, Metallic.ResourceSet);
-        CommandList.SetGraphicsResourceSet(5, Specular.ResourceSet);
-        CommandList.SetGraphicsResourceSet(6, Roughness.ResourceSet);
-        CommandList.SetGraphicsResourceSet(7, AO.ResourceSet);
-        CommandList.SetGraphicsResourceSet(8, Normal.ResourceSet);
-        CommandList.SetGraphicsResourceSet(9, Emissive.ResourceSet);
-        CommandList.SetGraphicsResourceSet(10, Alpha.ResourceSet);
+        CommandList.SetGraphicsResourceSet(3, ResourceSet);
     }
 }

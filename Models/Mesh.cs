@@ -17,7 +17,7 @@ public class Mesh : IDisposable
     public Section[] Sections;
     public Material[] Materials;
     
-    public bool isTwoSided;
+    public readonly bool IsTwoSided;
 
     public Mesh(GraphicsDevice graphicsDevice, CommandList commandList, ModelPipeline modelPipeline, CStaticMesh staticMesh, ResolvedObject[] materials)
     {
@@ -25,7 +25,7 @@ public class Mesh : IDisposable
         
         var lod = staticMesh.LODs[0];
         
-        isTwoSided = lod.IsTwoSided;
+        IsTwoSided = lod.IsTwoSided;
 
         //vertex
         var vertices = new Vertex[lod.Verts.Length];
@@ -59,7 +59,7 @@ public class Mesh : IDisposable
         Materials = new Material[materials.Length];
         for (var i = 0; i < Materials.Length; i++)
             if(materials[i].TryLoad(out var material))
-                Materials[i] = ResourceCache.GetOrAdd(material.Owner!.Name, ()=> new Material(graphicsDevice, commandList, modelPipeline.TextureResourceLayout, material));
+                Materials[i] = ResourceCache.GetOrAdd(material.Owner!.Name, ()=> new Material(graphicsDevice, commandList, modelPipeline.MaterialResourceLayout, material));
         
         //vertex buffer
         VertexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(vertices.Length * Vertex.SizeOf()), BufferUsage.VertexBuffer));

@@ -3,6 +3,7 @@ using System.Reflection;
 using CUE4Parse_Conversion.Textures;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using SkiaSharp;
+using StbImageSharp;
 using Veldrid;
 using PixelFormat = Veldrid.PixelFormat;
 
@@ -13,27 +14,39 @@ namespace UniversalUmap.Rendering.Models.Materials
         private bool IsDisposed;
         
         public Veldrid.Texture VeldridTexture { get; private set; }
-        public ResourceSet ResourceSet { get; private set; }
         
-    public Texture(GraphicsDevice graphicsDevice, ResourceLayout resourceLayout, UTexture texture)
+    public Texture(GraphicsDevice graphicsDevice, UTexture texture)
     {
         try
         {
-            var skBitmap = texture.Decode(RenderContext.TexturePlatform);
-            InitializeTextureFromBitmap(graphicsDevice, resourceLayout, texture, skBitmap);
+            InitializeTextureFromBitmap(graphicsDevice, texture, texture.Decode(RenderContext.TexturePlatform));
         }
         catch
         {
-            InitializeTextureFromColor(graphicsDevice, resourceLayout, new Vector4(0.5f));
+            InitializeTextureFromColor(graphicsDevice, new Vector4(1.0f));
         }
     }
     
-    public Texture(GraphicsDevice graphicsDevice, ResourceLayout resourceLayout, Vector4 color)
+    public Texture(GraphicsDevice graphicsDevice, Vector4 color)
     {
-        InitializeTextureFromColor(graphicsDevice, resourceLayout, color);
+        InitializeTextureFromColor(graphicsDevice, color);
     }
-
-    private void InitializeTextureFromBitmap(GraphicsDevice graphicsDevice, ResourceLayout resourceLayout, UTexture texture, SKBitmap bitmap)
+    
+    public Texture(GraphicsDevice graphicsDevice, string[] sourceNames) //CUBEMAP
+    {
+        ImageResultFloat[] imageResultFloats = new ImageResultFloat[6];
+        for(int i = 0; i < sourceNames.Length; i++)
+            imageResultFloats[i] = LoadTexture<ImageResultFloat>(sourceNames[i], ".hdr");
+        InitializeTextureCubeFromStbBitmaps(graphicsDevice, imageResultFloats);
+    }
+    
+    public Texture(GraphicsDevice graphicsDevice, string sourceName, string extension)
+    {
+        var imageResult = LoadTexture<ImageResult>(sourceName, extension);
+        InitializeTextureFromStbBitmap(graphicsDevice, imageResult);
+    }
+    
+    private void InitializeTextureFromStbBitmap(GraphicsDevice graphicsDevice, ImageResult bitmap)
     {
         VeldridTexture = graphicsDevice.ResourceFactory.CreateTexture(new TextureDescription
         {
@@ -42,46 +55,112 @@ namespace UniversalUmap.Rendering.Models.Materials
             Depth = 1,
             MipLevels = 1, //TODO: Load all mips
             ArrayLayers = 1,
-            Format = texture.SRGB ? PixelFormat.R8_G8_B8_A8_UNorm_SRgb : PixelFormat.R8_G8_B8_A8_UNorm,
+            Format = PixelFormat.R8G8B8A8UNorm,
+            Type = TextureType.Texture2D,
+            SampleCount = TextureSampleCount.Count1,
+            Usage = TextureUsage.Sampled
+        });
+        graphicsDevice.UpdateTexture(VeldridTexture, bitmap.Data, 0, 0, 0, (uint)bitmap.Width, (uint)bitmap.Height, 1, 0, 0);
+    }
+
+
+    private void InitializeTextureFromBitmap(GraphicsDevice graphicsDevice, UTexture texture, SKBitmap bitmap)
+    {
+        VeldridTexture = graphicsDevice.ResourceFactory.CreateTexture(new TextureDescription
+        {
+            Width = (uint)bitmap.Width,
+            Height = (uint)bitmap.Height,
+            Depth = 1,
+            MipLevels = 1, //TODO: Load all mips
+            ArrayLayers = 1,
+            Format = texture.SRGB ? PixelFormat.R8G8B8A8UNormSRgb : PixelFormat.R8G8B8A8UNorm,
             Type = TextureType.Texture2D,
             SampleCount = TextureSampleCount.Count1,
             Usage = TextureUsage.Sampled
         });
         graphicsDevice.UpdateTexture(VeldridTexture, bitmap.Bytes, 0, 0, 0, (uint)bitmap.Width, (uint)bitmap.Height, 1, 0, 0);
-        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(resourceLayout, VeldridTexture));
     }
     
-    public Texture(GraphicsDevice graphicsDevice, ResourceLayout resourceLayout, string[] sourceNames)
+    private T LoadTexture<T>(string sourceName, string extension) where T : class
     {
-        var bitmaps = new SKBitmap[6];
-        for (uint i = 0; i < bitmaps.Length; i++)
-            bitmaps[i] = SKBitmap.Decode(Assembly.GetExecutingAssembly().GetManifestResourceStream($"UniversalUmap.Rendering.Assets.Textures.{sourceNames[i]}.png"));
-        InitializeTextureCubeFromBitmaps(graphicsDevice, resourceLayout, bitmaps);
+        var resourceName = $"UniversalUmap.Rendering.Assets.Textures.{sourceName}{extension}";
+        using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+        {
+            if (typeof(T) == typeof(ImageResultFloat))
+                return ImageResultFloat.FromStream(stream, ColorComponents.RedGreenBlueAlpha) as T;
+            if (typeof(T) == typeof(ImageResult))
+                return ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha) as T;
+        }
+        return null;
     }
+    
+    private void InitializeTextureCubeFromStbBitmaps(GraphicsDevice graphicsDevice, ImageResultFloat[] bitmaps)
+    {
+        var firstBitmap = bitmaps[0];
+        var width = firstBitmap.Width;
+        var height = firstBitmap.Height;
 
-    
-    private void InitializeTextureCubeFromBitmaps(GraphicsDevice graphicsDevice, ResourceLayout resourceLayout, SKBitmap[] bitmaps)
-    {
+        var mipLevels = -1;
+        int mipWidth = width;
+        while (mipWidth > 1)
+        {
+            mipWidth >>= 1;
+            mipLevels++;
+        }
+
         VeldridTexture = graphicsDevice.ResourceFactory.CreateTexture(new TextureDescription
         {
-            Width = (uint)bitmaps[0].Width,
-            Height = (uint)bitmaps[0].Height,
+            Width = (uint)height,
+            Height = (uint)height,
             Depth = 1,
-            MipLevels = 1,
+            MipLevels = (uint)mipLevels,
             ArrayLayers = 1,
-            Format = PixelFormat.B8_G8_R8_A8_UNorm_SRgb,
+            Format = PixelFormat.R32G32B32A32Float,
             Type = TextureType.Texture2D,
             SampleCount = TextureSampleCount.Count1,
             Usage = TextureUsage.Sampled | TextureUsage.Cubemap
         });
-        for (uint i = 0; i < bitmaps.Length; i++)
-            graphicsDevice.UpdateTexture(VeldridTexture, bitmaps[i].Bytes, 0, 0, 0, (uint)bitmaps[i].Width, (uint)bitmaps[i].Height, 1, 0, i);
-        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(resourceLayout, VeldridTexture));
+
+        for (uint cubeIndex = 0; cubeIndex < 6; cubeIndex++)
+        {
+            mipWidth = height;
+            for (int mipLevel = 0; mipLevel < mipLevels; mipLevel++)
+            {
+                float[] mipData = ExtractMipData(bitmaps[cubeIndex], mipLevel, mipWidth);
+                graphicsDevice.UpdateTexture(VeldridTexture, mipData, 0, 0, 0, (uint)mipWidth, (uint)mipWidth, 1, (uint)mipLevel, cubeIndex);
+                mipWidth >>= 1; // Halve the width for the next mip level
+            }
+        }
     }
     
+    private float[] ExtractMipData(ImageResultFloat bitmap, int mipLevel, int mipWidth)
+    {
+        float[] mipData = new float[mipWidth * mipWidth * 4];
     
+        int startY = 0;
+        int startX = 0;
+        for (int i = 0; i < mipLevel; ++i)
+            startX += bitmap.Height / (1 << i);
 
-    private void InitializeTextureFromColor(GraphicsDevice graphicsDevice, ResourceLayout resourceLayout, Vector4 color)
+        int mipIndex = 0;
+        for (int y = 0; y < mipWidth; ++y)
+            for (int x = 0; x < mipWidth; ++x)
+            {
+                int currentX = startX + x;
+                int currentY = startY + y;
+                
+                int index = (currentY * bitmap.Width + currentX) * 4;
+            
+                mipData[mipIndex++] = bitmap.Data[index];
+                mipData[mipIndex++] = bitmap.Data[index + 1];
+                mipData[mipIndex++] = bitmap.Data[index + 2];
+                mipData[mipIndex++] = bitmap.Data[index + 3];
+            }
+        
+        return mipData;
+    }
+    
+    private void InitializeTextureFromColor(GraphicsDevice graphicsDevice, Vector4 color)
     {
         var bytes = new byte[4];
         bytes[0] = (byte)(color.X * 255); // R
@@ -96,13 +175,12 @@ namespace UniversalUmap.Rendering.Models.Materials
             Depth = 1,
             MipLevels = 1,
             ArrayLayers = 1,
-            Format = PixelFormat.R8_G8_B8_A8_UNorm,
+            Format = PixelFormat.R8G8B8A8UNorm,
             Type = TextureType.Texture2D,
             SampleCount = TextureSampleCount.Count1,
             Usage = TextureUsage.Sampled
         });
         graphicsDevice.UpdateTexture(VeldridTexture, bytes, 0, 0, 0, 1, 1, 1, 0, 0);
-        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(resourceLayout, VeldridTexture));
     }
         
         public void Dispose()
@@ -110,9 +188,7 @@ namespace UniversalUmap.Rendering.Models.Materials
             if(IsDisposed)
                 return;
             
-            ResourceSet.Dispose();
             VeldridTexture.Dispose();
-
             IsDisposed = true;
         }
     }

@@ -1,5 +1,6 @@
 ﻿using UniversalUmap.Rendering.Resources;
 using Veldrid;
+using Texture = UniversalUmap.Rendering.Models.Materials.Texture;
 
 namespace UniversalUmap.Rendering.Models;
 
@@ -10,9 +11,8 @@ public class ModelPipeline : IDisposable
     public readonly Pipeline TwoSidedPipeline;
 
     public ResourceSet AutoTextureResourceSet;
-    public ResourceSet TextureSamplerResourceSet;
-    
-    public ResourceLayout TextureResourceLayout;
+    public ResourceSet CubeMapAndSamplerResourceSet;
+    public ResourceLayout MaterialResourceLayout;
 
     private readonly List<IDisposable> Disposables;
     
@@ -24,13 +24,10 @@ public class ModelPipeline : IDisposable
         //Create main pipeline
         var autoTextureResourceLayout = CreateAutoTextureResourceLayout(autoTextureBuffer);
         var textureSamplerResourceLayout = CreateTextureSamplerResourceLayout();
-        var textureResourceLayout = CreateTextureResourceLayout();
+        var materialResourceLayout = CreateMaterialResourceLayout();
         var combinedResourceLayout = new[]
         {
-            autoTextureResourceLayout, cameraResourceLayout, textureSamplerResourceLayout, textureResourceLayout, 
-            textureResourceLayout, textureResourceLayout, textureResourceLayout,
-            textureResourceLayout, textureResourceLayout, textureResourceLayout, 
-            textureResourceLayout
+            autoTextureResourceLayout, cameraResourceLayout, textureSamplerResourceLayout, materialResourceLayout
         };
         
         var vertexLayouts = CreateMainVertexLayouts();
@@ -53,7 +50,7 @@ public class ModelPipeline : IDisposable
         );
         RegularPipeline = GraphicsDevice.ResourceFactory.CreateGraphicsPipeline(
             new GraphicsPipelineDescription(
-                BlendStateDescription.SingleAlphaBlend,
+                BlendStateDescription.SINGLE_ALPHA_BLEND,
                 depthStencilState,
                 mainRasterizerDescription,
                 PrimitiveTopology.TriangleList,
@@ -73,7 +70,7 @@ public class ModelPipeline : IDisposable
         );
         TwoSidedPipeline = GraphicsDevice.ResourceFactory.CreateGraphicsPipeline(
             new GraphicsPipelineDescription(
-                BlendStateDescription.SingleAlphaBlend,
+                BlendStateDescription.SINGLE_ALPHA_BLEND,
                 depthStencilState,
                 twoSidedRasterizerDescription,
                 PrimitiveTopology.TriangleList,
@@ -108,14 +105,28 @@ public class ModelPipeline : IDisposable
     private ResourceLayout CreateTextureSamplerResourceLayout()
     {
         //resource layout
-        var textureSamplerResourceLayout = GraphicsDevice.ResourceFactory.CreateResourceLayout(new ResourceLayoutDescription(
+        var cubeMapAndSamplerResourceLayout = GraphicsDevice.ResourceFactory.CreateResourceLayout(new ResourceLayoutDescription(
+            new ResourceLayoutElementDescription("irradianceTextureCube", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("radianceTextureCube", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("brdfLutTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
             new ResourceLayoutElementDescription("aniso4xSampler", ResourceKind.Sampler, ShaderStages.Fragment)
         ));
-        Disposables.Add(textureSamplerResourceLayout);
+        Disposables.Add(cubeMapAndSamplerResourceLayout);
+        
+        Texture irradianceTextureCube = new Texture(GraphicsDevice, ["irradiance_posx", "irradiance_negx", "irradiance_posy", "irradiance_negy", "irradiance_posz", "irradiance_negz"]);
+        Disposables.Add(irradianceTextureCube);
+        
+        Texture radianceTextureCube = new Texture(GraphicsDevice, ["radiance_posx", "radiance_negx", "radiance_posy", "radiance_negy", "radiance_posz", "radiance_negz"]);
+        Disposables.Add(radianceTextureCube);
+        
+        Texture brdfLutTexture = new Texture(GraphicsDevice, "ibl_brdf_lut", ".png");
+        Disposables.Add(brdfLutTexture);
+        
         //resource set
-        TextureSamplerResourceSet = GraphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(textureSamplerResourceLayout, GraphicsDevice.Aniso4xSampler));
-        Disposables.Add(TextureSamplerResourceSet);
-        return textureSamplerResourceLayout;
+        CubeMapAndSamplerResourceSet = GraphicsDevice.ResourceFactory.CreateResourceSet(
+            new ResourceSetDescription(cubeMapAndSamplerResourceLayout, irradianceTextureCube.VeldridTexture, radianceTextureCube.VeldridTexture, brdfLutTexture.VeldridTexture, GraphicsDevice.Aniso4XSampler));
+        Disposables.Add(CubeMapAndSamplerResourceSet);
+        return cubeMapAndSamplerResourceLayout;
     }
     
     private ResourceLayout CreateAutoTextureResourceLayout(DeviceBuffer autoTextureBuffer)
@@ -130,13 +141,20 @@ public class ModelPipeline : IDisposable
         return autoTextureResourceLayout;
     }
     
-    private ResourceLayout CreateTextureResourceLayout()
+    private ResourceLayout CreateMaterialResourceLayout()
     {
-        TextureResourceLayout = GraphicsDevice.ResourceFactory.CreateResourceLayout(new ResourceLayoutDescription(
-            new ResourceLayoutElementDescription("texture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)
+        MaterialResourceLayout = GraphicsDevice.ResourceFactory.CreateResourceLayout(new ResourceLayoutDescription(
+            new ResourceLayoutElementDescription("ColorTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("MetallicTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("SpecularTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("RoughnessTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("AoTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("NormalTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("AlphaTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("EmissiveTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)
         ));
-        Disposables.Add(TextureResourceLayout);
-        return TextureResourceLayout;
+        Disposables.Add(MaterialResourceLayout);
+        return MaterialResourceLayout;
     }
     
     public void Dispose()

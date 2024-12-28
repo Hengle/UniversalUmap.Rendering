@@ -30,11 +30,11 @@ public struct Vertex(Vector3 position, Vector4 color, Vector3 normal, Vector3 ta
 }
 
 [StructLayout(LayoutKind.Sequential)]
-public struct CameraUniform(Matrix4x4 projection, Matrix4x4 view, Vector4 front)
+public struct CameraUniform(Matrix4x4 projection, Matrix4x4 view, Vector3 position)
 {
     private Matrix4x4 Projection = projection;
     private Matrix4x4 View = view;
-    private Vector4 Front = front;
+    private Vector4 Position = new(position, 0f);
     public static uint SizeOf() => (uint)Marshal.SizeOf<CameraUniform>();
 }
 

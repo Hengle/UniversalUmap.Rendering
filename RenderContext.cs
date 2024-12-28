@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using CUE4Parse_Conversion.Meshes.PSK;
@@ -12,7 +13,6 @@ using UniversalUmap.Rendering.Models;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 using Veldrid.Sdl2;
-using Veldrid.StartupUtilities;
 using AutoTextureItem = UniversalUmap.Rendering.Models.Materials.AutoTextureItem;
 using Texture = Veldrid.Texture;
 
@@ -22,14 +22,17 @@ namespace UniversalUmap.Rendering;
 public class RenderContext : IDisposable
 {
     private readonly object Monitor;
+    Stopwatch Stopwatch;
     private Thread RenderThread;
     private bool Exit;
 
     private ModelPipeline ModelPipeline;
     private readonly List<Component> Models;
+    private readonly ConcurrentQueue<Component> AdditionQueue;
     
     private readonly Camera Camera;
-    private Skybox Skybox;
+    private SkyBox SkyBox;
+    private Grid Grid;
     
     private Sdl2Window Window;
     private uint Width;
@@ -61,8 +64,7 @@ public class RenderContext : IDisposable
     private readonly List<IDisposable> Disposables;
     private Texture OffscreenDepth;
     private ResourceLayout ResolvedColorResourceLayout;
-    private TextureView ResolvedColorTextureView;
-    
+
     //do this because UniversalUmap.Rendering is seperate
     public static ETexturePlatform TexturePlatform;
     public static AutoTextureItem[] AutoTextureItems;
@@ -77,14 +79,16 @@ public class RenderContext : IDisposable
     private RenderContext()
     {
         Disposables = [];
-        Models = [];
+        Models = new List<Component>(1000);
+        AdditionQueue = [];
         Width = 1280;
         Height = 720;
         Monitor = new object();
-        SampleCount = TextureSampleCount.Count8; //MSAA
-        Vsync = true;
+        Stopwatch = new Stopwatch();
+        SampleCount = TextureSampleCount.Count4; //MSAA
+        Vsync = false;
         Exit = false;
-        Camera = new Camera(new Vector3(0, 0, 100), new Vector3(0f, 0f, 0f), (float)Width/Height);
+        Camera = new Camera(new Vector3(1f, 100f, 1f), new Vector3(0f, 100f, 200f), (float)Width/Height);
     }
 
     public IntPtr Initialize(IntPtr instanceHandle)
@@ -105,12 +109,16 @@ public class RenderContext : IDisposable
         ModelPipeline = new ModelPipeline(GraphicsDevice, CameraResourceLayout, OffscreenFramebuffer.OutputDescription, AutoTextureBuffer);
         Disposables.Add(ModelPipeline);
         
-        Skybox = new Skybox(GraphicsDevice, CommandList, ModelPipeline.TextureResourceLayout, OffscreenFramebuffer.OutputDescription, CameraBuffer);
-        Disposables.Add(Skybox);
+        SkyBox = new SkyBox(GraphicsDevice, CommandList, OffscreenFramebuffer.OutputDescription, CameraBuffer);
+        Disposables.Add(SkyBox);
+        
+        Grid = new Grid(GraphicsDevice, CommandList, OffscreenFramebuffer.OutputDescription, CameraBuffer);
+        Disposables.Add(Grid);
         
         RenderThread = new Thread(RenderLoop) { IsBackground = true };
+        Stopwatch.Start();
         RenderThread.Start();
-
+        
         return windowHandle;
     }
 
@@ -154,14 +162,12 @@ public class RenderContext : IDisposable
     
     public void Load(UObject component, UStaticMesh mesh, FTransform[] transforms, UObject[] overrideMaterials)
     {
-        lock (Monitor)
-            Models.Add(new Component(ModelPipeline, GraphicsDevice, CommandList, CameraResourceSet, component, mesh, transforms, overrideMaterials));
+        AdditionQueue.Enqueue(new Component(ModelPipeline, GraphicsDevice, CommandList, CameraResourceSet, component, mesh, transforms, overrideMaterials));
     }
     
     public void Load(CStaticMesh mesh)
     {
-        lock (Monitor)
-            Models.Add(new Component(ModelPipeline, GraphicsDevice, CommandList, CameraResourceSet, mesh));
+        AdditionQueue.Enqueue(new Component(ModelPipeline, GraphicsDevice, CommandList, CameraResourceSet, mesh));
     }
 
     public void Clear()
@@ -171,21 +177,24 @@ public class RenderContext : IDisposable
             foreach (var model in Models)
                 model.Dispose();
             Models.Clear();
-            ResourceCache.Clear();
+            //ResourceCache.Clear();
         }
     }
     
     private IntPtr CreateWindowSwapChain(IntPtr instanceHandle)
     {
-        var windowOptions = new WindowCreateInfo
+        Window = new Sdl2Window(
+            "UniversalUmap 3D Viewer",
+            0,
+            0,
+            (int)Width,
+            (int)Height,
+            SDL_WindowFlags.OpenGL | SDL_WindowFlags.Resizable | SDL_WindowFlags.Hidden,
+            false)
         {
-            WindowWidth = (int)Width, WindowHeight = (int)Height, 
-            WindowTitle = "UniversalUmap 3D Viewer",
-            WindowInitialState = WindowState.Hidden
+            Visible = false,
+            WindowState = WindowState.Normal
         };
-        Window = VeldridStartup.CreateWindow(windowOptions);
-        Window.Visible = false;
-        Window.WindowState = WindowState.Normal;
         NativeWindowExtensions.MakeBorderless(Window.Handle);
         
         Window.MouseDown += @event =>
@@ -212,7 +221,7 @@ public class RenderContext : IDisposable
             swapchainSource,
             Width,
             Height,
-            PixelFormat.R32_Float,
+            PixelFormat.R32Float,
             Vsync
         );
         SwapChain = Factory.CreateSwapchain(ref swapchainDescription);
@@ -262,73 +271,63 @@ public class RenderContext : IDisposable
     
     private void RenderLoop()
     {
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        long previousTicks = stopwatch.ElapsedTicks;
-    
-        int frameCount = 0;
-        double elapsedTime = 0;
+        double previousTime = Stopwatch.Elapsed.TotalSeconds;
         while (!Exit)
         {
-            long currentTicks = stopwatch.ElapsedTicks;
-            double deltaTime = (currentTicks - previousTicks) / (double)Stopwatch.Frequency;
-            previousTicks = currentTicks;
+            double currentTime = Stopwatch.Elapsed.TotalSeconds;
+            double deltaTime = currentTime - previousTime;
+            previousTime = currentTime;
             
             Render(deltaTime);
-            
-            frameCount++;
-            elapsedTime += deltaTime;
-            // Check if 5 seconds have passed
-            if (elapsedTime >= 5.0)
-            {
-                double fps = frameCount / elapsedTime;
-                //Console.WriteLine($"FPS: {fps:F2}");
-                frameCount = 0;
-                elapsedTime = 0;
-            }
         }
     }
 
     
     private void Render(double deltaTime)
     {
-        //update input
+        //Update input
         InputTracker.Update(Window);
-        //update Camera
+        // Update Camera
         GraphicsDevice.UpdateBuffer(CameraBuffer, 0, Camera.Update(deltaTime));
         
-       CommandList.Begin();
+        CommandList.Begin();
 
         //Render to offscreen framebuffer
         CommandList.SetFramebuffer(OffscreenFramebuffer);
         CommandList.ClearDepthStencil(1);
-        CommandList.ClearColorTarget(0, RgbaFloat.Clear);
+        CommandList.ClearColorTarget(0, RgbaFloat.CLEAR);
         
-        //Draw models
-        Skybox.Render();
-
-        lock (Monitor)
+        while (AdditionQueue.TryDequeue(out var model))
+            lock(Monitor)
+                Models.Add(model);
+        
+        lock(Monitor)
             foreach (var model in Models)
                 model.Render(Camera.FrustumPlanes);
-        
+
+        SkyBox.Render();
+        Grid.Render();
+
         CommandList.ResolveTexture(OffscreenColor, ResolvedColor);
         
-        //Render to SwapChain framebuffer
         CommandList.SetFramebuffer(SwapChain.Framebuffer);
         CommandList.ClearDepthStencil(1);
-        CommandList.ClearColorTarget(0, RgbaFloat.Clear);
-        
+        CommandList.ClearColorTarget(0, RgbaFloat.CLEAR);
+
         //Set fullscreen quad pipeline
         CommandList.SetPipeline(FullscreenQuadPipeline);
         CommandList.SetVertexBuffer(0, FullscreenQuadPositions);
         CommandList.SetVertexBuffer(1, FullscreenQuadTextureCoordinates);
-        
+
         CommandList.SetGraphicsResourceSet(0, ResolvedColorResourceSet);
-        
+
         //Draw fullscreen quad
         CommandList.Draw(4);
-        
+
         CommandList.End();
         GraphicsDevice.SubmitCommands(CommandList);
+
+        //Present the image
         GraphicsDevice.SwapBuffers(SwapChain);
     }
     
@@ -369,7 +368,7 @@ public class RenderContext : IDisposable
             Depth = 1,
             MipLevels = 1,
             ArrayLayers = 1,
-            Format = PixelFormat.R32_Float,
+            Format = PixelFormat.R32Float,
             Type = TextureType.Texture2D,
             SampleCount = SampleCount,
             Usage = TextureUsage.DepthStencil
@@ -388,7 +387,7 @@ public class RenderContext : IDisposable
             Depth = 1,
             MipLevels = 1,
             ArrayLayers = 1,
-            Format = PixelFormat.R16_G16_B16_A16_Float,
+            Format = PixelFormat.B8G8R8A8UNorm,
             Type = TextureType.Texture2D,
             SampleCount = SampleCount,
             Usage = TextureUsage.RenderTarget | TextureUsage.Sampled
@@ -429,7 +428,7 @@ public class RenderContext : IDisposable
             Depth = 1,
             MipLevels = 1,
             ArrayLayers = 1,
-            Format = PixelFormat.R16_G16_B16_A16_Float,
+            Format = PixelFormat.B8G8R8A8UNorm,
             Type = TextureType.Texture2D,
             SampleCount = TextureSampleCount.Count1,
             Usage = TextureUsage.RenderTarget | TextureUsage.Sampled,
@@ -438,18 +437,10 @@ public class RenderContext : IDisposable
         
         if (recreate)
         {
-            Disposables.Remove(ResolvedColorTextureView);
-            ResolvedColorTextureView.Dispose();
-        }
-        ResolvedColorTextureView = Factory.CreateTextureView(ResolvedColor);
-        Disposables.Add(ResolvedColorTextureView);
-        
-        if (recreate)
-        {
             Disposables.Remove(ResolvedColorResourceSet);
             ResolvedColorResourceSet.Dispose();
         }
-        ResolvedColorResourceSet = Factory.CreateResourceSet(new ResourceSetDescription(ResolvedColorResourceLayout, ResolvedColorTextureView, GraphicsDevice.PointSampler));
+        ResolvedColorResourceSet = Factory.CreateResourceSet(new ResourceSetDescription(ResolvedColorResourceLayout, ResolvedColor, GraphicsDevice.PointSampler));
         Disposables.Add(ResolvedColorResourceSet);
     }
 
@@ -465,7 +456,7 @@ public class RenderContext : IDisposable
         
         CreateResolvedColorResourceSet();
         var pipelineDescription = new GraphicsPipelineDescription(
-            BlendStateDescription.SingleAlphaBlend,
+            BlendStateDescription.SINGLE_ALPHA_BLEND,
             new DepthStencilStateDescription
             {
                 DepthTestEnabled = true,

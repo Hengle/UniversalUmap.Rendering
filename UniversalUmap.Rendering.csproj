@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>UniversalUmap.Rendering</RootNamespace>
@@ -10,10 +10,11 @@
     <DebugType>none</DebugType>
   </PropertyGroup>
     <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
-    <PackageReference Include="Veldrid" Version="4.9.0" />
-    <PackageReference Include="Veldrid.SPIRV" Version="1.0.15" />
-    <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="ppy.Veldrid" Version="4.9.62-gca0239da6b" />
+    <PackageReference Include="ppy.Veldrid.SPIRV" Version="1.0.15-gfbb03d21c2" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+    <PackageReference Include="Veldrid.SDL2" Version="4.9.0" />
   </ItemGroup>
     <ItemGroup>
       <ProjectReference Include="..\CUE4Parse\CUE4Parse\CUE4Parse.csproj" />
@@ -25,12 +26,14 @@
     <ShaderSource Include="$(ProjectDir)Assets\Shaders\*.frag" />
     <CompiledShaders Include="$(ProjectDir)Assets\Shaders\*.spv" />
   </ItemGroup>
-  
+
   <Target Name="CompileShaders" BeforeTargets="ResolveReferences">
     <Delete Files="@(CompiledShaders)" />
-    <Exec Command="glslc &quot;%(ShaderSource.FullPath)&quot; -o &quot;%(ShaderSource.RootDir)%(ShaderSource.Directory)%(ShaderSource.Filename)%(ShaderSource.Extension).spv&quot;" Condition="'%(ShaderSource.Extension)' != '.spv'" />
+    <Exec Command="glslc &quot;%(ShaderSource.FullPath)&quot; -o &quot;%(ShaderSource.RootDir)%(ShaderSource.Directory)%(ShaderSource.Filename)%(ShaderSource.Extension).spv&quot;"
+          Condition="'%(ShaderSource.Extension)' != '.spv'"
+          LogStandardErrorAsError="true" />
   </Target>
-
+  
   <ItemGroup>
     <EmbeddedResource Include="Assets\**" />
   </ItemGroup>
