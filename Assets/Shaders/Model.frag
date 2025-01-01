@@ -133,7 +133,7 @@ vec3 calculateDirectionalLight(float intensity, vec3 F0, vec3 normalVector, vec3
     return intensity * CookTorranceBRDF(F0, normalVector, viewVector, directionalLightVector, albedo, metallic, roughness, specular);
 }
 
-vec3 calculateSkyLight(vec3 F0, vec3 fragNormal, vec3 normalVector, vec3 viewVector, vec3 albedoTexture, float metallicTexture, float roughnessTexture, float specularTexture, float aoTexture)
+vec3 calculateSkyLight(vec3 F0, vec3 normalVector, vec3 viewVector, vec3 albedoTexture, float metallicTexture, float roughnessTexture, float specularTexture, float aoTexture)
 {
     float NdotV = max(dot(normalVector, viewVector), 0.0);
 
@@ -142,26 +142,23 @@ vec3 calculateSkyLight(vec3 F0, vec3 fragNormal, vec3 normalVector, vec3 viewVec
     vec3 kD = 1.0 - kS;
     kD *= 1.0 - metallicTexture;
 
-    vec3 irradiance = texture(samplerCube(irradianceTextureCube, aniso4xSampler), fragNormal).rgb;
+    vec3 irradiance = texture(samplerCube(irradianceTextureCube, aniso4xSampler), normalVector).rgb;
     vec3 diffuse = irradiance * albedoTexture;
 
-    vec3 reflectVector = reflect(-viewVector, fragNormal);
+    vec3 reflectVector = reflect(-viewVector, normalVector);
     vec3 radiance = textureLod(samplerCube(radianceTextureCube, aniso4xSampler), reflectVector, roughnessTexture * MAX_REFLECTION_LOD).rgb;
     
-    vec2 envBRDF = texture(sampler2D(brdfLutTexture, aniso4xSampler), vec2(NdotV, roughnessTexture)).rg;
+    vec2 envBRDF = textureLod(sampler2D(brdfLutTexture, aniso4xSampler), vec2(NdotV, roughnessTexture), 0.0).rg;
     vec3 specular = radiance * F * (envBRDF.r + envBRDF.g) * (specularTexture * 2.0);
 
     return (kD * diffuse + specular) * aoTexture;
 }
 
-vec3 calculatePointLight(vec3 F0, vec3 normalVector, vec3 viewVector, vec3 lightPosition, vec3 albedo, float metallic, float roughness, float specular)
+vec3 calculatePointLight(float intensity, vec3 F0, vec3 normalVector, vec3 viewVector, vec3 lightVector, vec3 albedo, float metallic, float roughness, float specular)
 {
-    vec3 lightVector = lightPosition - fragPosition;
-    
     float distance = length(lightVector);
-    float intensity = 1.0 / (distance * distance);  //Inverse squared falloff
-    
-    return intensity * CookTorranceBRDF(F0, normalVector, viewVector, normalize(lightVector), albedo, metallic, roughness, specular);
+    intensity = intensity / (distance * distance);  //Inverse squared falloff
+    return intensity * CookTorranceBRDF(F0, normalVector, viewVector, lightVector, albedo, metallic, roughness, specular);
 }
 
 vec3 calculateNormals(vec3 fragNormal, vec3 fragTangent, vec3 normalTexture)
@@ -194,9 +191,9 @@ void main()
 
     vec3 viewVector = normalize(camera.position.xyz - fragPosition);
     
-    vec3 skyLight = calculateSkyLight(F0, fragNormal, normalVector, viewVector, albedo, metallic, roughness, specular, ao);
+    vec3 skyLight = calculateSkyLight(F0, normalVector, viewVector, albedo, metallic, roughness, specular, ao);
     
-    //vec3 directionalLight = calculateDirectionalLight(1.0, F0, normalVector, viewVector, albedo, metallic, roughness, specular);
+    vec3 pointLight = calculatePointLight(5.0, F0, normalVector, viewVector, viewVector, albedo, metallic, roughness, specular);
     
-    outColor = vec4(toSRGB(agx(skyLight)), 1.0);
+    outColor = vec4(toSRGB(agx(skyLight + pointLight)), 1.0);
 }

@@ -32,12 +32,15 @@ namespace UniversalUmap.Rendering.Models.Materials
         InitializeTextureFromColor(graphicsDevice, color);
     }
     
-    public Texture(GraphicsDevice graphicsDevice, string[] sourceNames) //CUBEMAP
+    public Texture(GraphicsDevice graphicsDevice, string[] sourceNames, bool loadMips = false) //CUBEMAP
     {
         ImageResultFloat[] imageResultFloats = new ImageResultFloat[6];
         for(int i = 0; i < sourceNames.Length; i++)
             imageResultFloats[i] = LoadTexture<ImageResultFloat>(sourceNames[i], ".hdr");
-        InitializeTextureCubeFromStbBitmaps(graphicsDevice, imageResultFloats);
+        if (loadMips)
+            InitializeTextureCubeMipsFromStbBitmaps(graphicsDevice, imageResultFloats);
+        else
+            InitializeTextureCubeFromStbBitmaps(graphicsDevice, imageResultFloats);
     }
     
     public Texture(GraphicsDevice graphicsDevice, string sourceName, string extension)
@@ -53,7 +56,7 @@ namespace UniversalUmap.Rendering.Models.Materials
             Width = (uint)bitmap.Width,
             Height = (uint)bitmap.Height,
             Depth = 1,
-            MipLevels = 1, //TODO: Load all mips
+            MipLevels = 1,
             ArrayLayers = 1,
             Format = PixelFormat.R8G8B8A8UNorm,
             Type = TextureType.Texture2D,
@@ -79,6 +82,8 @@ namespace UniversalUmap.Rendering.Models.Materials
             Usage = TextureUsage.Sampled
         });
         graphicsDevice.UpdateTexture(VeldridTexture, bitmap.Bytes, 0, 0, 0, (uint)bitmap.Width, (uint)bitmap.Height, 1, 0, 0);
+
+
     }
     
     private T LoadTexture<T>(string sourceName, string extension) where T : class
@@ -94,7 +99,7 @@ namespace UniversalUmap.Rendering.Models.Materials
         return null;
     }
     
-    private void InitializeTextureCubeFromStbBitmaps(GraphicsDevice graphicsDevice, ImageResultFloat[] bitmaps)
+    private void InitializeTextureCubeMipsFromStbBitmaps(GraphicsDevice graphicsDevice, ImageResultFloat[] bitmaps)
     {
         var firstBitmap = bitmaps[0];
         var width = firstBitmap.Width;
@@ -131,6 +136,28 @@ namespace UniversalUmap.Rendering.Models.Materials
                 mipWidth >>= 1; // Halve the width for the next mip level
             }
         }
+    }
+    
+    private void InitializeTextureCubeFromStbBitmaps(GraphicsDevice graphicsDevice, ImageResultFloat[] bitmaps)
+    {
+        var firstBitmap = bitmaps[0];
+        var width = (uint)firstBitmap.Width;
+        var height = (uint)firstBitmap.Height;
+        VeldridTexture = graphicsDevice.ResourceFactory.CreateTexture(new TextureDescription
+        {
+            Width = height,
+            Height = height,
+            Depth = 1,
+            MipLevels = 1,
+            ArrayLayers = 1,
+            Format = PixelFormat.R32G32B32A32Float,
+            Type = TextureType.Texture2D,
+            SampleCount = TextureSampleCount.Count1,
+            Usage = TextureUsage.Sampled | TextureUsage.Cubemap
+        });
+
+        for (uint cubeIndex = 0; cubeIndex < 6; cubeIndex++)
+            graphicsDevice.UpdateTexture(VeldridTexture, bitmaps[cubeIndex].Data, 0, 0, 0, width, height, 1, 0, cubeIndex);
     }
     
     private float[] ExtractMipData(ImageResultFloat bitmap, int mipLevel, int mipWidth)

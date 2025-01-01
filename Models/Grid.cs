@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
@@ -22,11 +23,11 @@ public class Grid : IDisposable
         CommandList = commandList;
         Disposables = [];
         
-        VertexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Vertices.Length * (uint)Marshal.SizeOf<Vector3>(), BufferUsage.VertexBuffer));
+        VertexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Vertices.Length * (uint)Unsafe.SizeOf<Vector3>(), BufferUsage.VertexBuffer));
         Disposables.Add(VertexBuffer);
         graphicsDevice.UpdateBuffer(VertexBuffer, 0, Vertices);
 
-        IndexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Indices.Length * (uint)Marshal.SizeOf<ushort>(), BufferUsage.IndexBuffer));
+        IndexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Indices.Length * (uint)Unsafe.SizeOf<ushort>(), BufferUsage.IndexBuffer));
         Disposables.Add(IndexBuffer);
         graphicsDevice.UpdateBuffer(IndexBuffer, 0, Indices);
         

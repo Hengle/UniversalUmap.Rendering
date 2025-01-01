@@ -22,8 +22,6 @@ public class Component : IDisposable
     private bool TwoSided;
     
     private DeviceBuffer TransformBuffer;
-    private readonly InstanceInfo[] Transforms;
-    private InstanceInfo[] VisibleTransforms;
     private Vector3[][] Bounds;
     private uint InstanceCount;
 
@@ -40,10 +38,10 @@ public class Component : IDisposable
         InstanceCount = 1;
         
         Mesh = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Mesh(GraphicsDevice, CommandList, ModelPipeline, staticMesh, [staticMesh.LODs[0].Sections.Value[0].Material]));
-        TwoSided = Mesh.IsTwoSided;
+        //TwoSided = Mesh.IsTwoSided;
     }
     
-    public Component(ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] originalTransforms, UObject[] overrideMaterials)
+    public Component(ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials = null)
     {
         ModelPipeline = modelPipeline;
         GraphicsDevice = graphicsDevice;
@@ -58,51 +56,43 @@ public class Component : IDisposable
         staticMesh.TryConvert(out CStaticMesh convertedMesh);
         Mesh = ResourceCache.GetOrAdd(staticMesh.Outer!.Name, ()=> new Mesh(GraphicsDevice, CommandList, ModelPipeline, convertedMesh, staticMesh.Materials));
         
-        TwoSided = component.Outer!.GetOrDefault<bool>("bMirrored") || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance") || Mesh.IsTwoSided;
+        TwoSided = component.Outer!.GetOrDefault<bool>("bMirrored") || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance");
         
-        VisibleTransforms = new InstanceInfo[originalTransforms.Length];
-        Transforms = new InstanceInfo[originalTransforms.Length];
-        for (var i = 0; i < originalTransforms.Length; i++)
+        var instanceInfos = new InstanceInfo[transforms.Length];
+        for (var i = 0; i < transforms.Length; i++)
         {
-            var transform = originalTransforms[i];
-            if (transform.Scale3D.X < 0 || transform.Scale3D.Y < 0 || transform.Scale3D.Z < 0)
-                TwoSided = true;
-            Transforms[i] = new InstanceInfo(transform);
-            VisibleTransforms[i] = Transforms[i];
+            TwoSided = (transforms[i].Scale3D.X < 0 || transforms[i].Scale3D.Y < 0 || transforms[i].Scale3D.Z < 0);
+            instanceInfos[i] = new InstanceInfo(transforms[i]);
         }
-        InstanceCount = (uint)originalTransforms.Length;
-        TransformBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(Transforms.Length * InstanceInfo.SizeOf()), BufferUsage.VertexBuffer));
+        InstanceCount = (uint)transforms.Length;
+        TransformBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(instanceInfos.Length * InstanceInfo.SizeOf()), BufferUsage.VertexBuffer));
+        GraphicsDevice.UpdateBuffer(TransformBuffer, 0, instanceInfos);
         
-        Bounds = new Vector3[Transforms.Length][];
-        for (var i = 0; i < Transforms.Length; i++)
-            Bounds[i] = CalculateBounds(Transforms[i], staticMesh.RenderData!.Bounds!);
+        Bounds = new Vector3[instanceInfos.Length][];
+        for (var i = 0; i < instanceInfos.Length; i++)
+            Bounds[i] = CalculateBounds(instanceInfos[i].Matrix, staticMesh.RenderData!.Bounds!);
     }
     
     public void Render(Plane[] frustumPlanes)
     {
-        if (Bounds != null)
-        {
-            uint instanceCount = 0;
-            for (var i = 0; i < Transforms.Length; i++)
-                if (IsInFrustum(Bounds[i], frustumPlanes))
-                    VisibleTransforms[instanceCount++] = Transforms[i];
-            InstanceCount = instanceCount;
-            GraphicsDevice.UpdateBuffer(TransformBuffer, 0, VisibleTransforms);
-        }
-        
-        if(InstanceCount == 0)
+        //only render if at least one instance is visible
+        var isVisible = false;
+        for (var i = 0; i < InstanceCount; i++)
+            if (IsInFrustum(Bounds[i], frustumPlanes))
+                isVisible = true;
+
+        if (!isVisible)
             return;
-        
+
         CommandList.SetPipeline(ModelPipeline.RegularPipeline);
-        
         CommandList.SetGraphicsResourceSet(0, ModelPipeline.AutoTextureResourceSet);
         CommandList.SetGraphicsResourceSet(1, CameraResourceSet);
         CommandList.SetGraphicsResourceSet(2, ModelPipeline.CubeMapAndSamplerResourceSet);
         CommandList.SetVertexBuffer(1, TransformBuffer);
         
-        Mesh.Render();
-
-        foreach (var section in Mesh.Sections)
+        Mesh.Render(0);
+        
+        foreach (var section in Mesh.Lods[0].Sections)
         {
             var i = section.MaterialIndex;
             Material material = null;
@@ -110,14 +100,69 @@ public class Component : IDisposable
                 material = OverrideMaterials[i];
             else if (i >= 0 && i < Mesh.Materials.Length && Mesh.Materials[i] != null)
                 material = Mesh.Materials[i];
+
             if (material != null)
             {
                 material.Render();
-                TwoSided = TwoSided || material.TwoSided;
+                TwoSided = TwoSided || material.TwoSided || Mesh.Lods[0].IsTwoSided;
             }
             CommandList.SetPipeline(TwoSided ? ModelPipeline.TwoSidedPipeline : ModelPipeline.RegularPipeline);
             CommandList.DrawIndexed(section.IndexCount, InstanceCount, section.FirstIndex, 0, 0);
         }
+    }
+
+    private double CalculateLODIndex(float relativeSize, int numberOfLODs)
+    {
+        float lodIndex = (1 - relativeSize) * (numberOfLODs - 1);
+        lodIndex = lodIndex * lodIndex / (numberOfLODs - 1);  // Apply a soft quadratic scaling
+        return lodIndex;
+    }
+    
+    bool IsVisibleAndCalculateScreenSize(Vector4[] worldAABB, Matrix4x4 viewProjectionMatrix, out float relativeSize)
+    {
+        // Initialize bounds to extreme values to update with NDC values
+        float minX = 1, minY = 1;
+        float maxX = -1, maxY = -1;
+
+        bool isInsideFrustum = false;
+    
+        foreach (var corner in worldAABB)
+        {
+            // Transform world AABB corner to clip space using the view-projection matrix
+            Vector4 clipSpaceCorner = Vector4.Transform(corner, viewProjectionMatrix);
+
+            // Convert from clip space to normalized device coordinates (NDC)
+            float ndcX = clipSpaceCorner.X / clipSpaceCorner.W;
+            float ndcY = clipSpaceCorner.Y / clipSpaceCorner.W;
+            float ndcZ = clipSpaceCorner.Z / clipSpaceCorner.W;
+
+            // Check if this corner is inside the frustum
+            if (ndcX >= -1 && ndcX <= 1 && ndcY >= -1 && ndcY <= 1 && ndcZ >= -1 && ndcZ <= 1)
+            {
+                isInsideFrustum = true;
+            }
+
+            // Update bounds for calculating relative size later (expand to encompass all corners)
+            minX = Math.Min(minX, ndcX);
+            maxX = Math.Max(maxX, ndcX);
+            minY = Math.Min(minY, ndcY);
+            maxY = Math.Max(maxY, ndcY);
+        }
+
+        if (!isInsideFrustum)
+        {
+            relativeSize = 0;
+            return false;
+        }
+
+        // Calculate width and height in NDC space (from -1 to 1 range)
+        float width = (maxX - minX) / 2.0f;  // NDC width from [-1, 1] to [0, 1]
+        float height = (maxY - minY) / 2.0f; // NDC height from [-1, 1] to [0, 1]
+
+        // Relative size is the area of the AABB in screen space
+        relativeSize = width * height;
+
+        return true;
     }
     
     private bool IsInFrustum(Vector3[] corners, Plane[] frustumPlanes)
@@ -145,19 +190,11 @@ public class Component : IDisposable
         }
         return true;
     }
-
-    private Vector3[] CalculateBounds(InstanceInfo transform, FBoxSphereBounds originalBounds)
+    
+    private Vector3[] CalculateBounds(Matrix4x4 matrix, FBoxSphereBounds originalBounds)
     {
-        var instanceBounds = new Vector3[10]; //also save origin and sphere radius per instance
-        instanceBounds[0] = Vector3.Transform(
-            new Vector3(
-                originalBounds.Origin.X,
-                originalBounds.Origin.Z,
-                originalBounds.Origin.Y),
-            transform.Matrix
-        );
-        instanceBounds[1] = new Vector3(originalBounds.SphereRadius);
-        var index = 2;
+        var instanceBounds = new Vector3[8]; //also save origin and sphere radius per instance
+        var index = 0;
         int[] signs = [-1, 1];
         foreach (var signX in signs)
         foreach (var signY in signs)
@@ -168,7 +205,7 @@ public class Component : IDisposable
                 originalBounds.BoxExtent.Y * signY,
                 originalBounds.BoxExtent.Z * signZ
             );
-            instanceBounds[index++] = Vector3.Transform(new Vector3(localCorner.X, localCorner.Z, localCorner.Y), transform.Matrix);
+            instanceBounds[index++] = Vector3.Transform(new Vector3(localCorner.X, localCorner.Z, localCorner.Y), matrix);
         }
         return instanceBounds;
     }

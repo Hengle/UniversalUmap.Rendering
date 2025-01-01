@@ -116,7 +116,7 @@ public class ModelPipeline : IDisposable
         Texture irradianceTextureCube = new Texture(GraphicsDevice, ["irradiance_posx", "irradiance_negx", "irradiance_posy", "irradiance_negy", "irradiance_posz", "irradiance_negz"]);
         Disposables.Add(irradianceTextureCube);
         
-        Texture radianceTextureCube = new Texture(GraphicsDevice, ["radiance_posx", "radiance_negx", "radiance_posy", "radiance_negy", "radiance_posz", "radiance_negz"]);
+        Texture radianceTextureCube = new Texture(GraphicsDevice, ["radiance_posx", "radiance_negx", "radiance_posy", "radiance_negy", "radiance_posz", "radiance_negz"], true);
         Disposables.Add(radianceTextureCube);
         
         Texture brdfLutTexture = new Texture(GraphicsDevice, "ibl_brdf_lut", ".png");

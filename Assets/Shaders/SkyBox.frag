@@ -10,5 +10,5 @@ layout(location = 0) out vec4 fragColor;
 
 void main()
 {
-    fragColor = vec4(toSRGB(reinhard(texture(samplerCube(cubeTexture, linearSampler), fragTexCoord).rgb)), 1.0);
+    fragColor = vec4(toSRGB(reinhard(textureLod(samplerCube(cubeTexture, linearSampler), fragTexCoord, 0.0).rgb)), 1.0);
 }

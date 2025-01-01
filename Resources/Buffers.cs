@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using CUE4Parse.UE4.Objects.Core.Math;
 
@@ -15,7 +16,7 @@ public struct AutoTextureMasks(Vector4 color, Vector4 metallic, Vector4 specular
     public Vector4 Normal = normal;
     public Vector4 Alpha = alpha;
     public Vector4 Emissive = emissive;
-    public static uint SizeOf() => (uint)Marshal.SizeOf<AutoTextureMasks>();
+    public static uint SizeOf() => (uint)Unsafe.SizeOf<AutoTextureMasks>();
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -26,7 +27,7 @@ public struct Vertex(Vector3 position, Vector4 color, Vector3 normal, Vector3 ta
     private Vector3 Normal = normal;
     private Vector3 Tangent = tangent;
     private Vector2 UV = uv;
-    public static uint SizeOf() => (uint)Marshal.SizeOf<Vertex>();
+    public static uint SizeOf() => (uint)Unsafe.SizeOf<Vertex>();
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -35,7 +36,7 @@ public struct CameraUniform(Matrix4x4 projection, Matrix4x4 view, Vector3 positi
     private Matrix4x4 Projection = projection;
     private Matrix4x4 View = view;
     private Vector4 Position = new(position, 0f);
-    public static uint SizeOf() => (uint)Marshal.SizeOf<CameraUniform>();
+    public static uint SizeOf() => (uint)Unsafe.SizeOf<CameraUniform>();
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -49,5 +50,5 @@ public struct InstanceInfo
                     Matrix4x4.CreateFromQuaternion(new Quaternion(transform.Rotation.X, transform.Rotation.Z, transform.Rotation.Y, -transform.Rotation.W)) *
                     Matrix4x4.CreateTranslation(transform.Translation.X, transform.Translation.Z, transform.Translation.Y);
     }
-    public static uint SizeOf() => (uint)Marshal.SizeOf<InstanceInfo>();
+    public static uint SizeOf() => (uint)Unsafe.SizeOf<InstanceInfo>();
 }
