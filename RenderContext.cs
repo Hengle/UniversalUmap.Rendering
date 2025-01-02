@@ -27,10 +27,12 @@ public class RenderContext : IDisposable
     private bool Exit;
 
     private ModelPipeline ModelPipeline;
-    private readonly List<Component> Models;
+    private readonly List<IRenderable> Models;
     private readonly ConcurrentQueue<Component> AdditionQueue;
     
-    private readonly Camera Camera;
+    private Camera Camera;
+    private readonly Frustum Frustum;
+
     private SkyBox SkyBox;
     private Grid Grid;
     
@@ -41,10 +43,6 @@ public class RenderContext : IDisposable
     private GraphicsDevice GraphicsDevice;
     private Swapchain SwapChain;
     private CommandList CommandList;
-
-    private DeviceBuffer CameraBuffer;
-    private ResourceLayout CameraResourceLayout;
-    private ResourceSet CameraResourceSet;
     
     private DeviceBuffer AutoTextureBuffer;
 
@@ -64,7 +62,7 @@ public class RenderContext : IDisposable
     private Texture OffscreenDepth;
     private ResourceLayout ResolvedColorResourceLayout;
 
-    //do this because UniversalUmap.Rendering is seperate
+    //do this because UniversalUmap.Rendering is a seperate module
     public static ETexturePlatform TexturePlatform;
     public static AutoTextureItem[] AutoTextureItems;
     
@@ -78,21 +76,24 @@ public class RenderContext : IDisposable
     private RenderContext()
     {
         Disposables = [];
-        Models = new List<Component>(1000);
+        Models = new List<IRenderable>(1000);
         AdditionQueue = [];
-        Width = 1280;
+        Width = 960;
         Height = 720;
         Monitor = new object();
         Stopwatch = new Stopwatch();
         SampleCount = TextureSampleCount.Count2; //MSAA
         Vsync = false;
         Exit = false;
-        Camera = new Camera(new Vector3(1f, 100f, 1f), new Vector3(0f, 100f, 200f), (float)Width/Height);
+        Frustum = new Frustum();
     }
 
     public IntPtr Initialize(IntPtr instanceHandle)
     {
         CreateGraphicsDevice();
+        
+        Camera = new Camera(GraphicsDevice, Frustum, new Vector3(1f, 100f, 1f), new Vector3(0f, 100f, 200f), (float)Width/Height);
+
         var windowHandle = CreateWindowSwapChain(instanceHandle);
 
         CreateFullscreenQuadPipeline();
@@ -103,15 +104,13 @@ public class RenderContext : IDisposable
         AutoTextureBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription(AutoTextureMasks.SizeOf(), BufferUsage.UniformBuffer));
         Disposables.Add(AutoTextureBuffer);
         
-        CreateCameraLayoutBufferResourceSet();
-
-        ModelPipeline = new ModelPipeline(GraphicsDevice, CameraResourceLayout, OffscreenFramebuffer.OutputDescription, AutoTextureBuffer);
+        ModelPipeline = new ModelPipeline(GraphicsDevice, Camera.CameraResourceLayout, OffscreenFramebuffer.OutputDescription, AutoTextureBuffer);
         Disposables.Add(ModelPipeline);
         
-        SkyBox = new SkyBox(GraphicsDevice, CommandList, OffscreenFramebuffer.OutputDescription, CameraBuffer);
+        SkyBox = new SkyBox(GraphicsDevice, CommandList, OffscreenFramebuffer.OutputDescription, Camera.CameraBuffer);
         Disposables.Add(SkyBox);
         
-        Grid = new Grid(GraphicsDevice, CommandList, OffscreenFramebuffer.OutputDescription, CameraBuffer);
+        Grid = new Grid(GraphicsDevice, CommandList, OffscreenFramebuffer.OutputDescription, Camera.CameraBuffer);
         Disposables.Add(Grid);
         
         RenderThread = new Thread(RenderLoop) { IsBackground = true };
@@ -161,12 +160,12 @@ public class RenderContext : IDisposable
     
     public void Load(UObject component, UStaticMesh mesh, FTransform[] transforms, UObject[] overrideMaterials)
     {
-        AdditionQueue.Enqueue(new Component(ModelPipeline, GraphicsDevice, CommandList, CameraResourceSet, component, mesh, transforms, overrideMaterials));
+        AdditionQueue.Enqueue(new Component(Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, component, mesh, transforms, overrideMaterials));
     }
     
     public void Load(CStaticMesh mesh)
     {
-        AdditionQueue.Enqueue(new Component(ModelPipeline, GraphicsDevice, CommandList, CameraResourceSet, mesh));
+        AdditionQueue.Enqueue(new Component(Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, mesh));
     }
 
     public void Clear()
@@ -176,7 +175,7 @@ public class RenderContext : IDisposable
             foreach (var model in Models)
                 model.Dispose();
             Models.Clear();
-            //ResourceCache.Clear();
+            ResourceCache.Clear();
         }
     }
     
@@ -251,28 +250,11 @@ public class RenderContext : IDisposable
         Disposables.Add(GraphicsDevice);
     }
     
-    private void CreateCameraLayoutBufferResourceSet()
-    {
-        //camera resource layout
-        CameraResourceLayout = GraphicsDevice.ResourceFactory.CreateResourceLayout(
-            new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("cameraUbo", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)
-            )
-        );
-        Disposables.Add(CameraResourceLayout);
-        //Create uniform buffer
-        CameraBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription(CameraUniform.SizeOf(), BufferUsage.UniformBuffer));
-        Disposables.Add(CameraBuffer);
-        // Create the resource set
-        CameraResourceSet = GraphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(CameraResourceLayout, CameraBuffer));
-        Disposables.Add(CameraResourceSet);
-    }
-    
     private void RenderLoop()
     {
         double previousTime = Stopwatch.Elapsed.TotalSeconds;
     
-        // FPS Counter
+        //FPS Counter
         double fpsTimer = 0.0;
     
         while (!Exit)
@@ -283,11 +265,13 @@ public class RenderContext : IDisposable
             
             Render(deltaTime);
 
-            // FPS Counter
+            //FPS Counter
             fpsTimer += deltaTime;
             if (fpsTimer >= 1.0)
             {
+#if DEBUG
                 Console.WriteLine($"FPS: {1 / deltaTime}");
+#endif
                 fpsTimer = 0.0;
             }
         }
@@ -297,8 +281,8 @@ public class RenderContext : IDisposable
     {
         //Update input
         InputTracker.Update(Window);
-        // Update Camera
-        GraphicsDevice.UpdateBuffer(CameraBuffer, 0, Camera.Update(deltaTime));
+        //Update Camera
+        Camera.Update(deltaTime);
         
         CommandList.Begin();
 
@@ -313,7 +297,7 @@ public class RenderContext : IDisposable
         
         lock(Monitor)
             foreach (var model in Models)
-                model.Render(Camera.FrustumPlanes);
+                model.Render();
 
         SkyBox.Render();
         Grid.Render();

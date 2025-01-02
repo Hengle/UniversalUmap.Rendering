@@ -4,18 +4,21 @@ using CUE4Parse_Conversion.Meshes.PSK;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Objects.Core.Math;
+using UniversalUmap.Rendering.Input;
 using UniversalUmap.Rendering.Models.Materials;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 
 namespace UniversalUmap.Rendering.Models;
 
-public class Component : IDisposable
+public class Component : IRenderable
 {
     private readonly ModelPipeline ModelPipeline;
     private readonly GraphicsDevice GraphicsDevice;
     private readonly CommandList CommandList;
     private readonly ResourceSet CameraResourceSet;
+    private readonly Frustum Frustum;
+
     
     private Mesh Mesh;
     private Material[] OverrideMaterials;
@@ -25,12 +28,14 @@ public class Component : IDisposable
     private Vector3[][] Bounds;
     private uint InstanceCount;
 
-    public Component(ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, CStaticMesh staticMesh)
+    public Component(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, CStaticMesh staticMesh)
     {
         ModelPipeline = modelPipeline;
         GraphicsDevice = graphicsDevice;
         CommandList = commandList;
         CameraResourceSet = cameraResourceSet;
+        Frustum = frustum;
+        
         OverrideMaterials = [];
 
         TransformBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription(InstanceInfo.SizeOf(), BufferUsage.VertexBuffer));
@@ -38,15 +43,15 @@ public class Component : IDisposable
         InstanceCount = 1;
         
         Mesh = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Mesh(GraphicsDevice, CommandList, ModelPipeline, staticMesh, [staticMesh.LODs[0].Sections.Value[0].Material]));
-        //TwoSided = Mesh.IsTwoSided;
     }
     
-    public Component(ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials = null)
+    public Component(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials = null)
     {
         ModelPipeline = modelPipeline;
         GraphicsDevice = graphicsDevice;
         CommandList = commandList;
         CameraResourceSet = cameraResourceSet;
+        Frustum = frustum;
         
         OverrideMaterials = new Material[overrideMaterials.Length];
         for (var i = 0; i < OverrideMaterials.Length; i++)
@@ -73,26 +78,29 @@ public class Component : IDisposable
             Bounds[i] = CalculateBounds(instanceInfos[i].Matrix, staticMesh.RenderData!.Bounds!);
     }
     
-    public void Render(Plane[] frustumPlanes)
+    public void Render()
     {
-        //only render if at least one instance is visible
-        var isVisible = false;
-        for (var i = 0; i < InstanceCount; i++)
-            if (IsInFrustum(Bounds[i], frustumPlanes))
-                isVisible = true;
+        if (Bounds != null)
+        {
+            //only render if at least one instance is visible
+            var isVisible = false;
+            for (var i = 0; i < InstanceCount; i++)
+                if (IsInFrustum(Bounds[i]))
+                    isVisible = true;
 
-        if (!isVisible)
-            return;
-
+            if (!isVisible)
+                return;
+        }
+        
         CommandList.SetPipeline(ModelPipeline.RegularPipeline);
         CommandList.SetGraphicsResourceSet(0, ModelPipeline.AutoTextureResourceSet);
         CommandList.SetGraphicsResourceSet(1, CameraResourceSet);
         CommandList.SetGraphicsResourceSet(2, ModelPipeline.CubeMapAndSamplerResourceSet);
         CommandList.SetVertexBuffer(1, TransformBuffer);
         
-        Mesh.Render(0);
+        Mesh.Render();
         
-        foreach (var section in Mesh.Lods[0].Sections)
+        foreach (var section in Mesh.Lods[Mesh.LodIndex].Sections)
         {
             var i = section.MaterialIndex;
             Material material = null;
@@ -165,11 +173,11 @@ public class Component : IDisposable
         return true;
     }
     
-    private bool IsInFrustum(Vector3[] corners, Plane[] frustumPlanes)
+    private bool IsInFrustum(Vector3[] corners)
     {
         var origin = corners[0];
         var sphereRadius = corners[1].X;
-        foreach (var plane in frustumPlanes)
+        foreach (var plane in Frustum.FrustumPlanes)
         {
             bool allOutside = true;
             if (Vector3.Dot(plane.Normal, origin) + plane.D >= -sphereRadius)
@@ -191,10 +199,18 @@ public class Component : IDisposable
         return true;
     }
     
-    private Vector3[] CalculateBounds(Matrix4x4 matrix, FBoxSphereBounds originalBounds)
+    private Vector3[] CalculateBounds(Matrix4x4 transform, FBoxSphereBounds originalBounds)
     {
-        var instanceBounds = new Vector3[8]; //also save origin and sphere radius per instance
-        var index = 0;
+        var instanceBounds = new Vector3[10]; //also save origin and sphere radius per instance
+        instanceBounds[0] = Vector3.Transform(
+            new Vector3(
+                originalBounds.Origin.X,
+                originalBounds.Origin.Z,
+                originalBounds.Origin.Y),
+            transform
+        );
+        instanceBounds[1] = new Vector3(originalBounds.SphereRadius);
+        var index = 2;
         int[] signs = [-1, 1];
         foreach (var signX in signs)
         foreach (var signY in signs)
@@ -205,7 +221,7 @@ public class Component : IDisposable
                 originalBounds.BoxExtent.Y * signY,
                 originalBounds.BoxExtent.Z * signZ
             );
-            instanceBounds[index++] = Vector3.Transform(new Vector3(localCorner.X, localCorner.Z, localCorner.Y), matrix);
+            instanceBounds[index++] = Vector3.Transform(new Vector3(localCorner.X, localCorner.Z, localCorner.Y), transform);
         }
         return instanceBounds;
     }

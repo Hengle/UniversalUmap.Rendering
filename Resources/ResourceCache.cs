@@ -36,7 +36,11 @@ public static class ResourceCache
             foreach (var mesh in Meshes)
                 mesh.Value.Dispose();
             Meshes.Clear();
+            
+            foreach (var material in Materials)
+                material.Value.Dispose();
             Materials.Clear();
+            
             foreach (var texture in Textures)
                 texture.Value.Dispose();
             Textures.Clear();

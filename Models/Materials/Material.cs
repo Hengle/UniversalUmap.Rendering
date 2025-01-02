@@ -10,7 +10,7 @@ using Veldrid;
 
 namespace UniversalUmap.Rendering.Models.Materials;
 
-public class Material
+public class Material : IDisposable
 {
     private readonly GraphicsDevice GraphicsDevice;
     private readonly CommandList CommandList;
@@ -215,5 +215,10 @@ public class Material
     public void Render()
     {
         CommandList.SetGraphicsResourceSet(3, ResourceSet);
+    }
+
+    public void Dispose()
+    {
+        ResourceSet.Dispose();
     }
 }

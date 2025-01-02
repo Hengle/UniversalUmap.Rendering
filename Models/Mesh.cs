@@ -6,16 +6,18 @@ using Veldrid;
 
 namespace UniversalUmap.Rendering.Models;
 
-public class Mesh : IDisposable
+public class Mesh : IRenderable
 {
     private readonly CommandList CommandList;
     
     public readonly LOD[] Lods;
     public readonly Material[] Materials;
+    public readonly int LodIndex;
 
     public Mesh(GraphicsDevice graphicsDevice, CommandList commandList, ModelPipeline modelPipeline, CStaticMesh staticMesh, ResolvedObject[] materials)
     {
         CommandList = commandList;
+        LodIndex = 0;
 
         Lods = new LOD[staticMesh.LODs.Count];
         for (var i = 0; i < staticMesh.LODs.Count; i++)
@@ -29,10 +31,10 @@ public class Mesh : IDisposable
     }
     
     
-    public void Render(int lodIndex)
+    public void Render()
     {
-        CommandList.SetVertexBuffer(0, Lods[lodIndex].VertexBuffer);
-        CommandList.SetIndexBuffer(Lods[lodIndex].IndexBuffer, IndexFormat.UInt32);
+        CommandList.SetVertexBuffer(0, Lods[LodIndex].VertexBuffer);
+        CommandList.SetIndexBuffer(Lods[LodIndex].IndexBuffer, IndexFormat.UInt32);
     }
 
     public void Dispose()

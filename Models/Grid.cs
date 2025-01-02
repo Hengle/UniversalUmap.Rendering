@@ -6,7 +6,7 @@ using Veldrid;
 
 namespace UniversalUmap.Rendering.Models;
 
-public class Grid : IDisposable
+public class Grid : IRenderable
 {
     private readonly CommandList CommandList;
     
@@ -70,9 +70,7 @@ public class Grid : IDisposable
         );
         Pipeline = graphicsDevice.ResourceFactory.CreateGraphicsPipeline(ref pipelineDescription);
         Disposables.Add(Pipeline);
-        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(
-            new ResourceSetDescription(resourceLayout, cameraBuffer)
-        );
+        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(resourceLayout, cameraBuffer));
         Disposables.Add(ResourceSet);
     }
 

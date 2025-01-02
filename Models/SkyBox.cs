@@ -7,7 +7,7 @@ using Texture = UniversalUmap.Rendering.Models.Materials.Texture;
 
 namespace UniversalUmap.Rendering.Models;
 
-public class SkyBox : IDisposable
+public class SkyBox : IRenderable
 {
     private readonly CommandList CommandList;
     
@@ -76,9 +76,7 @@ public class SkyBox : IDisposable
         );
         Pipeline = graphicsDevice.ResourceFactory.CreateGraphicsPipeline(ref pipelineDescription);
         Disposables.Add(Pipeline);
-        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(
-            new ResourceSetDescription(resourceLayout, cameraBuffer, textureCube.VeldridTexture, graphicsDevice.Aniso4XSampler)
-        );
+        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(resourceLayout, cameraBuffer, textureCube.VeldridTexture, graphicsDevice.Aniso4XSampler));
         Disposables.Add(ResourceSet);
     }
 
