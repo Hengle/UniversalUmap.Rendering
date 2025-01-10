@@ -7,7 +7,7 @@ layout(set = 0, binding = 0) uniform cameraUbo {
 } camera;
 
 const float near = 10.0;
-const float far = 1000000.0;
+const float far = 100000.0;
 
 layout(location = 0) in vec3 nearPoint;
 layout(location = 1) in vec3 farPoint;
@@ -87,7 +87,7 @@ const float blendRadiusMedium = 10000.0;
 
 void main() {
     float t = -nearPoint.y / (farPoint.y - nearPoint.y);
-    vec3 fragPos3D = nearPoint + t * (farPoint - nearPoint.y);
+    vec3 fragPos3D = nearPoint + t * (farPoint - nearPoint);
     gl_FragDepth = computeDepth(fragPos3D);
     
     float distanceToCenter = length(fragPos3D - camera.position.xyz);

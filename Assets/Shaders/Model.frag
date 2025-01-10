@@ -10,7 +10,14 @@ layout(location = 4) in vec2 fragUV;
 
 layout(location = 0) out vec4 outColor;
 
-layout(set = 0, binding = 0) uniform autoTextureUbo
+layout(set = 0, binding = 0) uniform cameraUbo
+{
+    mat4 projection;
+    mat4 view;
+    vec4 position;
+} camera;
+
+layout(set = 1, binding = 0) uniform autoTextureUbo
 {
     vec4 colorMask;
     vec4 metallicMask;
@@ -22,17 +29,10 @@ layout(set = 0, binding = 0) uniform autoTextureUbo
     vec4 alphaMask;
 } autoTexture;
 
-layout(set = 1, binding = 0) uniform cameraUbo
-{
-    mat4 projection;
-    mat4 view;
-    vec4 position;
-} camera;
-
 layout(set = 2, binding = 0) uniform textureCube irradianceTextureCube;
 layout(set = 2, binding = 1) uniform textureCube radianceTextureCube;
-layout(set = 2, binding = 3) uniform texture2D brdfLutTexture;
-layout(set = 2, binding = 4) uniform sampler aniso4xSampler;
+layout(set = 2, binding = 2) uniform texture2D brdfLutTexture;
+layout(set = 2, binding = 3) uniform sampler aniso4xSampler;
 
 layout(set = 3, binding = 0) uniform texture2D colorTexture;
 layout(set = 3, binding = 1) uniform texture2D metallicTexture;
@@ -99,7 +99,7 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-vec3 CookTorranceBRDF(vec3 F0, vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughness, float specular)
+vec3 cookTorranceBRDF(vec3 F0, vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughness, float specular)
 {
     vec3 H = normalize(V + L);  // Halfway vector
     
@@ -130,7 +130,7 @@ vec3 CookTorranceBRDF(vec3 F0, vec3 N, vec3 V, vec3 L, vec3 albedo, float metall
 
 vec3 calculateDirectionalLight(float intensity, vec3 F0, vec3 normalVector, vec3 viewVector, vec3 albedo, float metallic, float roughness, float specular)
 {
-    return intensity * CookTorranceBRDF(F0, normalVector, viewVector, directionalLightVector, albedo, metallic, roughness, specular);
+    return intensity * cookTorranceBRDF(F0, normalVector, viewVector, directionalLightVector, albedo, metallic, roughness, specular);
 }
 
 vec3 calculateSkyLight(vec3 F0, vec3 normalVector, vec3 viewVector, vec3 albedoTexture, float metallicTexture, float roughnessTexture, float specularTexture, float aoTexture)
@@ -154,11 +154,11 @@ vec3 calculateSkyLight(vec3 F0, vec3 normalVector, vec3 viewVector, vec3 albedoT
     return (kD * diffuse + specular) * aoTexture;
 }
 
-vec3 calculatePointLight(float intensity, vec3 F0, vec3 normalVector, vec3 viewVector, vec3 lightVector, vec3 albedo, float metallic, float roughness, float specular)
+vec3 calculatePointLight(float intensity, float distance, vec3 F0, vec3 normalVector, vec3 viewVector, vec3 lightVector, vec3 albedo, float metallic, float roughness, float specular)
 {
-    float distance = length(lightVector);
-    intensity = intensity / (distance * distance);  //Inverse squared falloff
-    return intensity * CookTorranceBRDF(F0, normalVector, viewVector, lightVector, albedo, metallic, roughness, specular);
+    //intensity = intensity / (distance * distance);  //Inverse squared falloff
+    intensity = intensity / distance;  //Linear falloff
+    return intensity * cookTorranceBRDF(F0, normalVector, viewVector, lightVector, albedo, metallic, roughness, specular);
 }
 
 vec3 calculateNormals(vec3 fragNormal, vec3 fragTangent, vec3 normalTexture)
@@ -188,12 +188,13 @@ void main()
 
     vec3 F0 = vec3(0.04);  //Base reflectance for dielectric
     F0 = mix(F0, albedo, metallic);  //For metallics, mix F0 with albedo
-
+    
     vec3 viewVector = normalize(camera.position.xyz - fragPosition);
     
     vec3 skyLight = calculateSkyLight(F0, normalVector, viewVector, albedo, metallic, roughness, specular, ao);
     
-    vec3 pointLight = calculatePointLight(5.0, F0, normalVector, viewVector, viewVector, albedo, metallic, roughness, specular);
+    float lightDistance = length(camera.position.xyz - fragPosition);
+    vec3 pointLight = calculatePointLight(2500.0, lightDistance, F0, normalVector, viewVector, viewVector, albedo, metallic, roughness, specular);
     
     outColor = vec4(toSRGB(agx(skyLight + pointLight)), 1.0);
 }

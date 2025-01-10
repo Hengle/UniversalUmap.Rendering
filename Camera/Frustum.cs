@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace UniversalUmap.Rendering.Input;
+namespace UniversalUmap.Rendering.Camera;
 
 public class Frustum
 {

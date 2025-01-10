@@ -17,7 +17,7 @@ layout(location = 2) out vec3 fragNormal;
 layout(location = 3) out vec3 fragTangent;
 layout(location = 4) out vec2 fragUV;
 
-layout(set = 1, binding = 0) uniform cameraUbo
+layout(set = 0, binding = 0) uniform cameraUbo
 {
     mat4 projection;
     mat4 view;

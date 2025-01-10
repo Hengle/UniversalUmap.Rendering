@@ -1,27 +1,28 @@
 ﻿using CUE4Parse_Conversion.Meshes.PSK;
 using CUE4Parse.UE4.Assets;
-using UniversalUmap.Rendering.Models.Materials;
+using UniversalUmap.Rendering.Renderables.Models.Materials;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 
-namespace UniversalUmap.Rendering.Models;
+namespace UniversalUmap.Rendering.Renderables.Models;
 
-public class Mesh : IRenderable
+public class Model : IRenderable
 {
     private readonly CommandList CommandList;
     
-    public readonly LOD[] Lods;
+    public readonly Lod[] Lods;
     public readonly Material[] Materials;
     public readonly int LodIndex;
 
-    public Mesh(GraphicsDevice graphicsDevice, CommandList commandList, ModelPipeline modelPipeline, CStaticMesh staticMesh, ResolvedObject[] materials)
+    public Model(GraphicsDevice graphicsDevice, CommandList commandList, ModelPipeline modelPipeline, CStaticMesh staticMesh, ResolvedObject[] materials)
     {
         CommandList = commandList;
-        LodIndex = 0;
 
-        Lods = new LOD[staticMesh.LODs.Count];
+        Lods = new Lod[staticMesh.LODs.Count];
         for (var i = 0; i < staticMesh.LODs.Count; i++)
-            Lods[i] = new LOD(graphicsDevice, staticMesh.LODs[i]);
+            Lods[i] = new Lod(graphicsDevice, staticMesh.LODs[i]);
+        
+        LodIndex = Lods.Length - 1;
         
         //Materials
         Materials = new Material[materials.Length];
@@ -29,8 +30,7 @@ public class Mesh : IRenderable
             if(materials[i].TryLoad(out var material))
                 Materials[i] = ResourceCache.GetOrAdd(material.Owner!.Name, ()=> new Material(graphicsDevice, commandList, modelPipeline.MaterialResourceLayout, material));
     }
-    
-    
+
     public void Render()
     {
         CommandList.SetVertexBuffer(0, Lods[LodIndex].VertexBuffer);

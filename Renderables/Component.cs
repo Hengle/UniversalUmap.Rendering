@@ -4,12 +4,14 @@ using CUE4Parse_Conversion.Meshes.PSK;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Objects.Core.Math;
+using UniversalUmap.Rendering.Camera;
 using UniversalUmap.Rendering.Input;
-using UniversalUmap.Rendering.Models.Materials;
+using UniversalUmap.Rendering.Renderables.Models;
+using UniversalUmap.Rendering.Renderables.Models.Materials;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 
-namespace UniversalUmap.Rendering.Models;
+namespace UniversalUmap.Rendering.Renderables;
 
 public class Component : IRenderable
 {
@@ -20,7 +22,7 @@ public class Component : IRenderable
     private readonly Frustum Frustum;
 
     
-    private Mesh Mesh;
+    private Models.Model Model;
     private Material[] OverrideMaterials;
     private bool TwoSided;
     
@@ -42,7 +44,7 @@ public class Component : IRenderable
         GraphicsDevice.UpdateBuffer(TransformBuffer, 0, new InstanceInfo(FTransform.Identity));
         InstanceCount = 1;
         
-        Mesh = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Mesh(GraphicsDevice, CommandList, ModelPipeline, staticMesh, [staticMesh.LODs[0].Sections.Value[0].Material]));
+        Model = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, staticMesh, [staticMesh.LODs[0].Sections.Value[0].Material]));
     }
     
     public Component(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials = null)
@@ -59,14 +61,14 @@ public class Component : IRenderable
                 OverrideMaterials[i] = ResourceCache.GetOrAdd(overrideMaterials[i].Outer!.Name, ()=> new Material(graphicsDevice, commandList, ModelPipeline.MaterialResourceLayout, overrideMaterials[i]));
         
         staticMesh.TryConvert(out CStaticMesh convertedMesh);
-        Mesh = ResourceCache.GetOrAdd(staticMesh.Outer!.Name, ()=> new Mesh(GraphicsDevice, CommandList, ModelPipeline, convertedMesh, staticMesh.Materials));
+        Model = ResourceCache.GetOrAdd(staticMesh.Outer!.Name, ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, convertedMesh, staticMesh.Materials));
         
         TwoSided = component.Outer!.GetOrDefault<bool>("bMirrored") || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance");
         
         var instanceInfos = new InstanceInfo[transforms.Length];
         for (var i = 0; i < transforms.Length; i++)
         {
-            TwoSided = (transforms[i].Scale3D.X < 0 || transforms[i].Scale3D.Y < 0 || transforms[i].Scale3D.Z < 0);
+            TwoSided |= (transforms[i].Scale3D.X < 0 || transforms[i].Scale3D.Y < 0 || transforms[i].Scale3D.Z < 0);
             instanceInfos[i] = new InstanceInfo(transforms[i]);
         }
         InstanceCount = (uint)transforms.Length;
@@ -93,27 +95,28 @@ public class Component : IRenderable
         }
         
         CommandList.SetPipeline(ModelPipeline.RegularPipeline);
-        CommandList.SetGraphicsResourceSet(0, ModelPipeline.AutoTextureResourceSet);
-        CommandList.SetGraphicsResourceSet(1, CameraResourceSet);
+        CommandList.SetGraphicsResourceSet(0, CameraResourceSet);
+        CommandList.SetGraphicsResourceSet(1, ModelPipeline.AutoTextureResourceSet);
         CommandList.SetGraphicsResourceSet(2, ModelPipeline.CubeMapAndSamplerResourceSet);
         CommandList.SetVertexBuffer(1, TransformBuffer);
         
-        Mesh.Render();
+        Model.Render();
         
-        foreach (var section in Mesh.Lods[Mesh.LodIndex].Sections)
+        foreach (var section in Model.Lods[Model.LodIndex].Sections)
         {
             var i = section.MaterialIndex;
             Material material = null;
             if (i >= 0 && i < OverrideMaterials.Length && OverrideMaterials[i] != null)
                 material = OverrideMaterials[i];
-            else if (i >= 0 && i < Mesh.Materials.Length && Mesh.Materials[i] != null)
-                material = Mesh.Materials[i];
+            else if (i >= 0 && i < Model.Materials.Length && Model.Materials[i] != null)
+                material = Model.Materials[i];
 
             if (material != null)
             {
                 material.Render();
-                TwoSided = TwoSided || material.TwoSided || Mesh.Lods[0].IsTwoSided;
+                TwoSided = TwoSided || (material.TwoSided ?? false) || Model.Lods[0].IsTwoSided;
             }
+            
             CommandList.SetPipeline(TwoSided ? ModelPipeline.TwoSidedPipeline : ModelPipeline.RegularPipeline);
             CommandList.DrawIndexed(section.IndexCount, InstanceCount, section.FirstIndex, 0, 0);
         }

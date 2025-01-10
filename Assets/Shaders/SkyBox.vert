@@ -4,7 +4,7 @@ layout(set = 0, binding = 0) uniform cameraUbo
 {
     mat4 projection;
     mat4 view;
-    vec4 front;
+    vec4 position;
 } camera;
 
 layout(location = 0) in vec3 inPosition;
