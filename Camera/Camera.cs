@@ -1,8 +1,9 @@
 ﻿using System.Numerics;
+using UniversalUmap.Rendering.Input;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 
-namespace UniversalUmap.Rendering.Input;
+namespace UniversalUmap.Rendering.Camera;
 
 public class Camera : IDisposable
 {
@@ -11,7 +12,7 @@ public class Camera : IDisposable
     public readonly ResourceLayout CameraResourceLayout;
     public readonly ResourceSet CameraResourceSet;
 
-    private readonly Frustum Frustum;
+    public readonly Frustum Frustum;
     
     private readonly Vector3 Up;
     
@@ -27,22 +28,25 @@ public class Camera : IDisposable
     private float AspectRatio;
     
     private Matrix4x4 ProjectionMatrix;
-    
-    public Camera(GraphicsDevice graphicsDevice, Frustum frustum, Vector3 position, Vector3 direction, float aspectRatio)
+
+    public Vector3 JumpPosition { get; set; }
+
+    public Camera(GraphicsDevice graphicsDevice, Vector3 position, Vector3 direction, float aspectRatio)
     {
         GraphicsDevice = graphicsDevice;
-        Frustum = frustum;
+        Frustum = new Frustum();
         
         Position = position;
+        JumpPosition = position;
         Direction = direction;
         AspectRatio = aspectRatio;
         Fov = 90f;
-        Far = 100000f;
+        Far = 1000000f;
         Near = 10f;
         MouseSpeed = 1f;
         FlySpeed = 1f;
         Up = Vector3.UnitY;
-
+        
         ProjectionMatrix = Matrix4x4.CreatePerspectiveFieldOfView(Fov * (float)Math.PI / 180f, AspectRatio, Near, Far);
         
         //camera resources
@@ -54,7 +58,7 @@ public class Camera : IDisposable
         CameraBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription(CameraUniform.SizeOf(), BufferUsage.UniformBuffer));
         CameraResourceSet = GraphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(CameraResourceLayout, CameraBuffer));
     }
-
+    
     private void UpdateBuffer()
     {
         // Update camera buffer
@@ -133,7 +137,15 @@ public class Camera : IDisposable
         if (InputTracker.GetKey(Key.X)) // zoom out
             Zoom(-50, deltaTime);
 
+        if (InputTracker.GetKeyDown(Key.F))
+            JumpToPosition();
+
         UpdateBuffer();
+    }
+
+    private void JumpToPosition()
+    {
+        Position = JumpPosition;
     }
 
     private void Zoom(double amount, double deltaTime)

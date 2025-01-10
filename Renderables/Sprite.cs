@@ -1,50 +1,47 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 
-namespace UniversalUmap.Rendering.Models;
+namespace UniversalUmap.Rendering.Renderables;
 
-public class Grid : IRenderable
+public class Sprite : IRenderable
 {
     private readonly CommandList CommandList;
     
     private readonly DeviceBuffer VertexBuffer;
-    private readonly DeviceBuffer IndexBuffer;
 
     private readonly Pipeline Pipeline;
     private readonly ResourceSet ResourceSet;
+    private readonly ResourceSet CameraResourceSet;
 
     private readonly List<IDisposable> Disposables;
 
-    public Grid(GraphicsDevice graphicsDevice, CommandList commandList,  OutputDescription outputDescription, DeviceBuffer cameraBuffer)
+    public Sprite(GraphicsDevice graphicsDevice, CommandList commandList,  OutputDescription outputDescription, ResourceSet cameraResourceSet, ResourceLayout cameraResourceLayout, DeviceBuffer cameraBuffer)
     {
         CommandList = commandList;
+        CameraResourceSet = cameraResourceSet;
         Disposables = [];
         
-        VertexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Vertices.Length * (uint)Unsafe.SizeOf<Vector3>(), BufferUsage.VertexBuffer));
+        VertexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Vertices.Length * (uint)Unsafe.SizeOf<SimpleVertex>(), BufferUsage.VertexBuffer));
         Disposables.Add(VertexBuffer);
         graphicsDevice.UpdateBuffer(VertexBuffer, 0, Vertices);
-
-        IndexBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Indices.Length * (uint)Unsafe.SizeOf<ushort>(), BufferUsage.IndexBuffer));
-        Disposables.Add(IndexBuffer);
-        graphicsDevice.UpdateBuffer(IndexBuffer, 0, Indices);
         
         var vertexLayout = new VertexLayoutDescription(
-            new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
+            new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float2)
         );
-        
-        var shaders = ShaderLoader.Load(graphicsDevice, "Grid");
+
+        var shaders = ShaderLoader.Load(graphicsDevice, "Sprite");
         Disposables.Add(shaders[0]);
         Disposables.Add(shaders[1]);
 
         var resourceLayout = graphicsDevice.ResourceFactory.CreateResourceLayout(
             new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("cameraUbo", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)
+                new ResourceLayoutElementDescription("spriteParameters", ResourceKind.UniformBuffer, ShaderStages.Vertex)
             )
         );
         Disposables.Add(resourceLayout);
+        
         var pipelineDescription = new GraphicsPipelineDescription(
             BlendStateDescription.SINGLE_ALPHA_BLEND,
             new DepthStencilStateDescription
@@ -65,31 +62,32 @@ public class Grid : IRenderable
                 [vertexLayout],
                 shaders
             ),
-            [resourceLayout],
+            [cameraResourceLayout, resourceLayout],
             outputDescription
         );
         Pipeline = graphicsDevice.ResourceFactory.CreateGraphicsPipeline(ref pipelineDescription);
         Disposables.Add(Pipeline);
-        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(resourceLayout, cameraBuffer));
+        
+        ResourceSet = graphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(resourceLayout));
         Disposables.Add(ResourceSet);
     }
 
     public void Render()
     {
         CommandList.SetVertexBuffer(0, VertexBuffer);
-        CommandList.SetIndexBuffer(IndexBuffer, IndexFormat.UInt16);
         CommandList.SetPipeline(Pipeline);
-        CommandList.SetGraphicsResourceSet(0, ResourceSet);
-        CommandList.DrawIndexed((uint)Indices.Length);
+        CommandList.SetGraphicsResourceSet(0, CameraResourceSet);
+        CommandList.SetGraphicsResourceSet(1, ResourceSet);
+
+        CommandList.Draw(4);
     }
     
-    private static readonly ushort[] Indices = [0, 1, 2, 1, 0, 3];
-    private static readonly Vector3[] Vertices =
+    private static readonly Vector2[] Vertices =
     [
-        new(1f,  1f, 0f),
-        new(-1f, -1f, 0f),
-        new(-1f,  1f, 0f),
-        new(1f, -1f, 0)
+        new(-1, -1),
+        new(1, -1),
+        new(-1, 1),
+        new(1, 1),
     ];
     
     public void Dispose()
@@ -99,5 +97,3 @@ public class Grid : IRenderable
             disposable.Dispose();
     }
 }
-            
-            

@@ -2,6 +2,7 @@
 
 #include "Utils/ToneMapping.glsl"
 
+//cameraUbo is binding 0
 layout(set = 0, binding = 1) uniform textureCube cubeTexture;
 layout(set = 0, binding = 2) uniform sampler linearSampler;
 

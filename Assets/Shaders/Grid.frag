@@ -87,7 +87,7 @@ const float blendRadiusMedium = 10000.0;
 
 void main() {
     float t = -nearPoint.y / (farPoint.y - nearPoint.y);
-    vec3 fragPos3D = nearPoint + t * (farPoint - nearPoint.y);
+    vec3 fragPos3D = nearPoint + t * (farPoint - nearPoint);
     gl_FragDepth = computeDepth(fragPos3D);
     
     float distanceToCenter = length(fragPos3D - camera.position.xyz);

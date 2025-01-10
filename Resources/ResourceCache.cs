@@ -1,17 +1,17 @@
 ﻿using CUE4Parse.Utils;
-using UniversalUmap.Rendering.Models;
-using UniversalUmap.Rendering.Models.Materials;
+using UniversalUmap.Rendering.Renderables.Models;
+using UniversalUmap.Rendering.Renderables.Models.Materials;
 
 namespace UniversalUmap.Rendering.Resources;
 
 public static class ResourceCache
 {
     private static readonly object Monitor = new();
-    private static readonly Dictionary<string, Mesh> Meshes = new();
+    private static readonly Dictionary<string, Model> Meshes = new();
     private static readonly Dictionary<string, Material> Materials = new();
     private static readonly Dictionary<string, Texture> Textures = new();
     
-    public static Mesh GetOrAdd(string key, Func<Mesh> valueFactory)
+    public static Model GetOrAdd(string key, Func<Model> valueFactory)
     {
         lock (Monitor)
             return Meshes.GetOrAdd(key, valueFactory);

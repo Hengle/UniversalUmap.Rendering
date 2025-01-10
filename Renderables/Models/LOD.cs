@@ -3,16 +3,16 @@ using CUE4Parse_Conversion.Meshes.PSK;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 
-namespace UniversalUmap.Rendering.Models;
+namespace UniversalUmap.Rendering.Renderables.Models;
 
-public class LOD : IDisposable
+public class Lod : IDisposable
 {
     public readonly DeviceBuffer VertexBuffer;
     public readonly DeviceBuffer IndexBuffer;
     public readonly Section[] Sections;
     public readonly bool IsTwoSided;
 
-    public LOD(GraphicsDevice graphicsDevice, CStaticMeshLod lod)
+    public Lod(GraphicsDevice graphicsDevice, CStaticMeshLod lod)
     {
         IsTwoSided = lod.IsTwoSided;
         //vertex

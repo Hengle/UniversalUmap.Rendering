@@ -9,11 +9,12 @@ using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Core.Math;
 using UniversalUmap.Rendering.Extensions;
 using UniversalUmap.Rendering.Input;
-using UniversalUmap.Rendering.Models;
+using UniversalUmap.Rendering.Renderables;
+using UniversalUmap.Rendering.Renderables.Models;
+using UniversalUmap.Rendering.Renderables.Models.Materials;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
 using Veldrid.Sdl2;
-using AutoTextureItem = UniversalUmap.Rendering.Models.Materials.AutoTextureItem;
 using Texture = Veldrid.Texture;
 
 namespace UniversalUmap.Rendering;
@@ -22,7 +23,7 @@ namespace UniversalUmap.Rendering;
 public class RenderContext : IDisposable
 {
     private readonly object Monitor;
-    Stopwatch Stopwatch;
+    private readonly Stopwatch Stopwatch;
     private Thread RenderThread;
     private bool Exit;
 
@@ -30,9 +31,8 @@ public class RenderContext : IDisposable
     private readonly List<IRenderable> Models;
     private readonly ConcurrentQueue<Component> AdditionQueue;
     
-    private Camera Camera;
-    private readonly Frustum Frustum;
-
+    private Camera.Camera Camera;
+    
     private SkyBox SkyBox;
     private Grid Grid;
     
@@ -47,13 +47,12 @@ public class RenderContext : IDisposable
     private DeviceBuffer AutoTextureBuffer;
 
     private readonly TextureSampleCount SampleCount;
-    private readonly bool Vsync;
+    private bool Vsync;
 
     private Texture OffscreenColor;
     private Framebuffer OffscreenFramebuffer;
     private Pipeline FullscreenQuadPipeline;
     private DeviceBuffer FullscreenQuadPositions;
-    private DeviceBuffer FullscreenQuadTextureCoordinates;
 
     private Texture ResolvedColor;
     private ResourceSet ResolvedColorResourceSet;
@@ -61,38 +60,45 @@ public class RenderContext : IDisposable
     private readonly List<IDisposable> Disposables;
     private Texture OffscreenDepth;
     private ResourceLayout ResolvedColorResourceLayout;
+    private DeviceBuffer WindowResolutionBuffer;
 
     //do this because UniversalUmap.Rendering is a seperate module
     public static ETexturePlatform TexturePlatform;
     public static AutoTextureItem[] AutoTextureItems;
-    
+
     private static RenderContext instance;
 
     public static RenderContext GetInstance()
     {
         return instance ??= new RenderContext();
     }
-    
+
     private RenderContext()
     {
         Disposables = [];
-        Models = new List<IRenderable>(1000);
+        Models = [];
         AdditionQueue = [];
-        Width = 960;
-        Height = 720;
+        Width = 1280;
+        Height = 1024;
         Monitor = new object();
         Stopwatch = new Stopwatch();
         SampleCount = TextureSampleCount.Count2; //MSAA
-        Vsync = false;
+        Vsync = true;
         Exit = false;
-        Frustum = new Frustum();
+    }
+
+    public void SetVsync(bool value)
+    {
+        Vsync = value;
+        SwapChain.SyncToVerticalBlank = Vsync;
+        OnResized();
     }
 
     public IntPtr Initialize(IntPtr instanceHandle)
     {
         CreateGraphicsDevice();
         
-        Camera = new Camera(GraphicsDevice, Frustum, new Vector3(1f, 100f, 1f), new Vector3(0f, 100f, 200f), (float)Width/Height);
+        Camera = new Camera.Camera(GraphicsDevice, new Vector3(1f, 100f, 1f), new Vector3(0f, 100f, 200f), (float)Width/Height);
 
         var windowHandle = CreateWindowSwapChain(instanceHandle);
 
@@ -119,7 +125,7 @@ public class RenderContext : IDisposable
         
         return windowHandle;
     }
-
+    
     public void LoadAutoTexture(AutoTextureItem[] autoTextureItems)
     {
         AutoTextureItems = autoTextureItems;
@@ -160,12 +166,13 @@ public class RenderContext : IDisposable
     
     public void Load(UObject component, UStaticMesh mesh, FTransform[] transforms, UObject[] overrideMaterials)
     {
-        AdditionQueue.Enqueue(new Component(Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, component, mesh, transforms, overrideMaterials));
+        Camera.JumpPosition = new Vector3(transforms[0].Translation.X, transforms[0].Translation.Z, transforms[0].Translation.Y);
+        AdditionQueue.Enqueue(new Component(Camera.Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, component, mesh, transforms, overrideMaterials));
     }
     
     public void Load(CStaticMesh mesh)
     {
-        AdditionQueue.Enqueue(new Component(Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, mesh));
+        AdditionQueue.Enqueue(new Component(Camera.Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, mesh));
     }
 
     public void Clear()
@@ -177,6 +184,7 @@ public class RenderContext : IDisposable
             Models.Clear();
             ResourceCache.Clear();
         }
+        Camera.JumpPosition = Vector3.Zero;
     }
     
     private IntPtr CreateWindowSwapChain(IntPtr instanceHandle)
@@ -187,7 +195,7 @@ public class RenderContext : IDisposable
             0,
             (int)Width,
             (int)Height,
-            SDL_WindowFlags.OpenGL | SDL_WindowFlags.Resizable | SDL_WindowFlags.Hidden,
+            SDL_WindowFlags.OpenGL | SDL_WindowFlags.Resizable ,
             false)
         {
             Visible = false,
@@ -225,7 +233,6 @@ public class RenderContext : IDisposable
         );
         SwapChain = GraphicsDevice.ResourceFactory.CreateSwapchain(ref swapchainDescription);
         Disposables.Add(SwapChain);
-
         return Window.Handle;
     }
     
@@ -237,6 +244,7 @@ public class RenderContext : IDisposable
         Camera.Resize(Width, Height);
         CreateOffscreenFramebuffer(recreate: true);
         CreateResolvedColorResourceSet(recreate: true);
+        GraphicsDevice.UpdateBuffer(WindowResolutionBuffer, 0, new Vector4(1f / Width, 1f / Height, 0, 0));
     }
 
     private void CreateGraphicsDevice()
@@ -264,16 +272,15 @@ public class RenderContext : IDisposable
             previousTime = currentTime;
             
             Render(deltaTime);
-
-            //FPS Counter
+            
+#if DEBUG
             fpsTimer += deltaTime;
             if (fpsTimer >= 1.0)
             {
-#if DEBUG
                 Console.WriteLine($"FPS: {1 / deltaTime}");
-#endif
                 fpsTimer = 0.0;
             }
+#endif
         }
     }
     
@@ -311,7 +318,6 @@ public class RenderContext : IDisposable
         //Set fullscreen quad pipeline
         CommandList.SetPipeline(FullscreenQuadPipeline);
         CommandList.SetVertexBuffer(0, FullscreenQuadPositions);
-        CommandList.SetVertexBuffer(1, FullscreenQuadTextureCoordinates);
 
         CommandList.SetGraphicsResourceSet(0, ResolvedColorResourceSet);
 
@@ -343,9 +349,8 @@ public class RenderContext : IDisposable
     
     private VertexLayoutDescription[] CreateFullscreenQuadVertexLayouts()
     {
-        var vertexLayoutPositions = new VertexLayoutDescription(new VertexElementDescription("Positions", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3));
-        var vertexLayoutTextureCoordinates = new VertexLayoutDescription(new VertexElementDescription("TextureCoordinates", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float2));
-        return [vertexLayoutPositions, vertexLayoutTextureCoordinates];
+        var vertexLayoutPositions = new VertexLayoutDescription(new VertexElementDescription("Positions", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float2));
+        return [vertexLayoutPositions];
     }
     
     private void CreateOffscreenFramebuffer(bool recreate = false)
@@ -406,7 +411,8 @@ public class RenderContext : IDisposable
         }
         ResolvedColorResourceLayout = GraphicsDevice.ResourceFactory.CreateResourceLayout(new ResourceLayoutDescription(
             new ResourceLayoutElementDescription("TextureColor", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-            new ResourceLayoutElementDescription("SamplerColor", ResourceKind.Sampler, ShaderStages.Fragment)
+            new ResourceLayoutElementDescription("SamplerColor", ResourceKind.Sampler, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("WindowResolution", ResourceKind.UniformBuffer, ShaderStages.Fragment)
         ));
         Disposables.Add(ResolvedColorResourceLayout);
         
@@ -431,10 +437,20 @@ public class RenderContext : IDisposable
         
         if (recreate)
         {
+            Disposables.Remove(WindowResolutionBuffer);
+            WindowResolutionBuffer.Dispose();
+        }
+        WindowResolutionBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)Unsafe.SizeOf<Vector4>(), BufferUsage.UniformBuffer));
+        GraphicsDevice.UpdateBuffer(WindowResolutionBuffer, 0, new Vector4(1f / Width, 1f / Height, 0, 0));
+        Disposables.Add(WindowResolutionBuffer);
+        
+        
+        if (recreate)
+        {
             Disposables.Remove(ResolvedColorResourceSet);
             ResolvedColorResourceSet.Dispose();
         }
-        ResolvedColorResourceSet = GraphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(ResolvedColorResourceLayout, ResolvedColor, GraphicsDevice.PointSampler));
+        ResolvedColorResourceSet = GraphicsDevice.ResourceFactory.CreateResourceSet(new ResourceSetDescription(ResolvedColorResourceLayout, ResolvedColor, GraphicsDevice.PointSampler, WindowResolutionBuffer));
         Disposables.Add(ResolvedColorResourceSet);
     }
 
@@ -476,34 +492,15 @@ public class RenderContext : IDisposable
 
     private void CreateFullscreenQuadBuffers()
     {
-        var fullscreenQuadPositions = new[]
+        var fullscreenQuadPositions = new Vector2[]
         {
-            new Vector3(-1, -1, 0),
-            new Vector3(1, -1, 0),
-            new Vector3(-1, 1, 0),
-            new Vector3(1, 1, 0),
+            new(-1, -1),
+            new(1, -1),
+            new(-1, 1),
+            new(1),
         };
-        FullscreenQuadPositions = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(Unsafe.SizeOf<Vector3>() * fullscreenQuadPositions.Length), BufferUsage.VertexBuffer));
+        FullscreenQuadPositions = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(Unsafe.SizeOf<Vector2>() * fullscreenQuadPositions.Length), BufferUsage.VertexBuffer));
         Disposables.Add(FullscreenQuadPositions);
         GraphicsDevice.UpdateBuffer(FullscreenQuadPositions, 0, fullscreenQuadPositions);
-
-        var fullscreenQuadTextureCoordinates = GraphicsDevice.IsUvOriginTopLeft
-            ? new[]
-            {
-                new Vector2(0, 1),
-                new Vector2(1, 1),
-                new Vector2(0, 0),
-                new Vector2(1, 0),
-            }
-            :
-            [
-                new Vector2(0, 0),
-                new Vector2(1, 0),
-                new Vector2(0, 1),
-                new Vector2(1, 1)
-            ];
-        FullscreenQuadTextureCoordinates = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(Unsafe.SizeOf<Vector2>() * fullscreenQuadTextureCoordinates.Length), BufferUsage.VertexBuffer));
-        Disposables.Add(FullscreenQuadTextureCoordinates);
-        GraphicsDevice.UpdateBuffer(FullscreenQuadTextureCoordinates, 0, fullscreenQuadTextureCoordinates);
     }
 }

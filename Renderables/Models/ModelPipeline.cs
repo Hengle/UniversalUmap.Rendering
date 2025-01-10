@@ -1,8 +1,9 @@
-﻿using UniversalUmap.Rendering.Resources;
+﻿using UniversalUmap.Rendering.Renderables.Models.Materials;
+using UniversalUmap.Rendering.Resources;
 using Veldrid;
-using Texture = UniversalUmap.Rendering.Models.Materials.Texture;
+using Texture = UniversalUmap.Rendering.Renderables.Models.Materials.Texture;
 
-namespace UniversalUmap.Rendering.Models;
+namespace UniversalUmap.Rendering.Renderables.Models;
 
 public class ModelPipeline : IDisposable
 {
@@ -27,7 +28,7 @@ public class ModelPipeline : IDisposable
         var materialResourceLayout = CreateMaterialResourceLayout();
         var combinedResourceLayout = new[]
         {
-            autoTextureResourceLayout, cameraResourceLayout, textureSamplerResourceLayout, materialResourceLayout
+            cameraResourceLayout, autoTextureResourceLayout, textureSamplerResourceLayout, materialResourceLayout
         };
         
         var vertexLayouts = CreateMainVertexLayouts();
@@ -113,13 +114,13 @@ public class ModelPipeline : IDisposable
         ));
         Disposables.Add(cubeMapAndSamplerResourceLayout);
         
-        Texture irradianceTextureCube = new Texture(GraphicsDevice, ["irradiance_posx", "irradiance_negx", "irradiance_posy", "irradiance_negy", "irradiance_posz", "irradiance_negz"]);
+        var irradianceTextureCube = new TextureCube(GraphicsDevice, ["irradiance_posx", "irradiance_negx", "irradiance_posy", "irradiance_negy", "irradiance_posz", "irradiance_negz"]);
         Disposables.Add(irradianceTextureCube);
         
-        Texture radianceTextureCube = new Texture(GraphicsDevice, ["radiance_posx", "radiance_negx", "radiance_posy", "radiance_negy", "radiance_posz", "radiance_negz"], true);
+        var radianceTextureCube = new TextureCube(GraphicsDevice, ["radiance_posx", "radiance_negx", "radiance_posy", "radiance_negy", "radiance_posz", "radiance_negz"], true);
         Disposables.Add(radianceTextureCube);
         
-        Texture brdfLutTexture = new Texture(GraphicsDevice, "ibl_brdf_lut", ".png");
+        var brdfLutTexture = new Texture(GraphicsDevice, "ibl_brdf_lut", ".png");
         Disposables.Add(brdfLutTexture);
         
         //resource set

@@ -31,6 +31,14 @@ public struct Vertex(Vector3 position, Vector4 color, Vector3 normal, Vector3 ta
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public struct SimpleVertex(Vector3 position, Vector2 uv)
+{
+    private Vector3 Position = position;
+    private Vector2 UV = uv;
+    public static uint SizeOf() => (uint)Unsafe.SizeOf<Vertex>();
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public struct CameraUniform(Matrix4x4 projection, Matrix4x4 view, Vector3 position)
 {
     private Matrix4x4 Projection = projection;

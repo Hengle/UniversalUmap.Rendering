@@ -1,11 +1,10 @@
 ﻿using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
+using UniversalUmap.Rendering.Renderables.Models.Materials;
 using UniversalUmap.Rendering.Resources;
 using Veldrid;
-using Texture = UniversalUmap.Rendering.Models.Materials.Texture;
 
-namespace UniversalUmap.Rendering.Models;
+namespace UniversalUmap.Rendering.Renderables;
 
 public class SkyBox : IRenderable
 {
@@ -32,7 +31,7 @@ public class SkyBox : IRenderable
         Disposables.Add(IndexBuffer);
         graphicsDevice.UpdateBuffer(IndexBuffer, 0, Indices);
         
-        Texture textureCube = new Texture(graphicsDevice, ["radiance_posx", "radiance_negx", "radiance_posy", "radiance_negy", "radiance_posz", "radiance_negz"], true);
+        var textureCube = new TextureCube(graphicsDevice, ["radiance_posx", "radiance_negx", "radiance_posy", "radiance_negy", "radiance_posz", "radiance_negz"], true);
         Disposables.Add(textureCube);
         
         var vertexLayout = new VertexLayoutDescription(

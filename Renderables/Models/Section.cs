@@ -1,4 +1,4 @@
-﻿namespace UniversalUmap.Rendering.Models;
+﻿namespace UniversalUmap.Rendering.Renderables.Models;
 
 public class Section
 {

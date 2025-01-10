@@ -1,6 +1,6 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 
-namespace UniversalUmap.Rendering.Models.Materials;
+namespace UniversalUmap.Rendering.Renderables.Models.Materials;
 
 public partial class AutoTextureItem : ObservableObject
 {
