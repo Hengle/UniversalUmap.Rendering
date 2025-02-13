@@ -48,6 +48,8 @@ public class RenderContext : IDisposable
 
     private readonly TextureSampleCount SampleCount;
     private bool Vsync;
+    private bool Dirty;
+    private double TargetFrameTime;
 
     private Texture OffscreenColor;
     private Framebuffer OffscreenFramebuffer;
@@ -83,17 +85,12 @@ public class RenderContext : IDisposable
         Monitor = new object();
         Stopwatch = new Stopwatch();
         SampleCount = TextureSampleCount.Count2; //MSAA
-        Vsync = true;
+        Vsync = false;
         Exit = false;
+        Dirty = false;
+        TargetFrameTime = 1d / NativeWindowsExtensions.GetDisplayRefreshRate();
     }
-
-    public void SetVsync(bool value)
-    {
-        Vsync = value;
-        SwapChain.SyncToVerticalBlank = Vsync;
-        OnResized();
-    }
-
+    
     public IntPtr Initialize(IntPtr instanceHandle)
     {
         CreateGraphicsDevice();
@@ -126,44 +123,6 @@ public class RenderContext : IDisposable
         return windowHandle;
     }
     
-    public void LoadAutoTexture(AutoTextureItem[] autoTextureItems)
-    {
-        AutoTextureItems = autoTextureItems;
-        var autoTextureMasks = new AutoTextureMasks();
-        foreach (var item in AutoTextureItems)
-        {
-            var mask = new Vector4(item.R ? 1.0f : 0.0f, item.G ? 1.0f : 0.0f, item.B ? 1.0f : 0.0f, item.A ? 1.0f : 0.0f);
-            switch (item.Parameter)
-            {
-                case "Color":
-                    autoTextureMasks.Color = mask;
-                    break;
-                case "Metallic":
-                    autoTextureMasks.Metallic = mask;
-                    break;
-                case "Specular":
-                    autoTextureMasks.Specular = mask;
-                    break;
-                case "Roughness":
-                    autoTextureMasks.Roughness = mask;
-                    break;
-                case "AO":
-                    autoTextureMasks.AO = mask;
-                    break;
-                case "Normal":
-                    autoTextureMasks.Normal = mask;
-                    break;
-                case "Emissive":
-                    autoTextureMasks.Emissive = mask;
-                    break;
-                case "Alpha":
-                    autoTextureMasks.Alpha = mask;
-                    break;
-            }
-        }
-        GraphicsDevice.UpdateBuffer(AutoTextureBuffer, 0, autoTextureMasks);
-    }
-    
     public void Load(UObject component, UStaticMesh mesh, FTransform[] transforms, UObject[] overrideMaterials)
     {
         Camera.JumpPosition = new Vector3(transforms[0].Translation.X, transforms[0].Translation.Z, transforms[0].Translation.Y);
@@ -185,6 +144,7 @@ public class RenderContext : IDisposable
             ResourceCache.Clear();
         }
         Camera.JumpPosition = Vector3.Zero;
+        Dirty = true;
     }
     
     private IntPtr CreateWindowSwapChain(IntPtr instanceHandle)
@@ -201,7 +161,7 @@ public class RenderContext : IDisposable
             Visible = false,
             WindowState = WindowState.Normal
         };
-        NativeWindowExtensions.MakeBorderless(Window.Handle);
+        NativeWindowsExtensions.MakeBorderless(Window.Handle);
         
         Window.MouseDown += @event =>
         {
@@ -245,6 +205,7 @@ public class RenderContext : IDisposable
         CreateOffscreenFramebuffer(recreate: true);
         CreateResolvedColorResourceSet(recreate: true);
         GraphicsDevice.UpdateBuffer(WindowResolutionBuffer, 0, new Vector4(1f / Width, 1f / Height, 0, 0));
+        Dirty = true;
     }
 
     private void CreateGraphicsDevice()
@@ -260,36 +221,67 @@ public class RenderContext : IDisposable
     
     private void RenderLoop()
     {
+        NativeWindowsExtensions.EnableHighPrecisionTimer(1);
         double previousTime = Stopwatch.Elapsed.TotalSeconds;
-    
-        //FPS Counter
+        double accumulatedTime = 0.0;
+
+        // FPS Counter
         double fpsTimer = 0.0;
-    
+        int frameCount = 0;
+
         while (!Exit)
         {
             double currentTime = Stopwatch.Elapsed.TotalSeconds;
             double deltaTime = currentTime - previousTime;
             previousTime = currentTime;
-            
-            Render(deltaTime);
+            accumulatedTime += deltaTime;
+
+            if (accumulatedTime >= TargetFrameTime)
+            {
+                Render(accumulatedTime);
+                accumulatedTime = 0.0;
+                frameCount++;
+            }
+
+            // Adjust the sleep based on the remaining time needed for the frame.
+            double sleepTime = TargetFrameTime - (Stopwatch.Elapsed.TotalSeconds - currentTime);
+            if (sleepTime > 0.0001) //tolerance
+                Thread.Yield(); //Yield to the OS to allow other threads to run
             
 #if DEBUG
             fpsTimer += deltaTime;
             if (fpsTimer >= 1.0)
             {
-                Console.WriteLine($"FPS: {1 / deltaTime}");
+                double fps = frameCount / fpsTimer;
+                Console.WriteLine($"FPS: {fps:F2}");
                 fpsTimer = 0.0;
+                frameCount = 0;
             }
 #endif
+
         }
+        NativeWindowsExtensions.DisableHighPrecisionTimer(1);
     }
     
     private void Render(double deltaTime)
     {
         //Update input
         InputTracker.Update(Window);
-        //Update Camera
-        Camera.Update(deltaTime);
+
+        //Check for any Camera updates
+        Dirty |= Camera.Update(deltaTime);  //Bitwise OR to accumulate the dirty state
+        
+        //Add new models to Models List if there are any
+        while (AdditionQueue.TryDequeue(out var model))
+        {
+            lock (Monitor)
+                Models.Add(model);
+            Dirty = true;
+        }
+
+        //Skip rendering if no changes
+        if (!Dirty)
+            return;
         
         CommandList.Begin();
 
@@ -297,20 +289,22 @@ public class RenderContext : IDisposable
         CommandList.SetFramebuffer(OffscreenFramebuffer);
         CommandList.ClearDepthStencil(1);
         CommandList.ClearColorTarget(0, RgbaFloat.CLEAR);
-        
-        while (AdditionQueue.TryDequeue(out var model))
-            lock(Monitor)
-                Models.Add(model);
-        
-        lock(Monitor)
+
+        //Render models
+        lock (Monitor)
+        {
             foreach (var model in Models)
                 model.Render();
+        }
 
+        //Render skybox and grid
         SkyBox.Render();
         Grid.Render();
 
+        //Resolve the offscreen texture to the final target
         CommandList.ResolveTexture(OffscreenColor, ResolvedColor);
-        
+
+        //Render to the swapchain framebuffer
         CommandList.SetFramebuffer(SwapChain.Framebuffer);
         CommandList.ClearDepthStencil(1);
         CommandList.ClearColorTarget(0, RgbaFloat.CLEAR);
@@ -318,17 +312,17 @@ public class RenderContext : IDisposable
         //Set fullscreen quad pipeline
         CommandList.SetPipeline(FullscreenQuadPipeline);
         CommandList.SetVertexBuffer(0, FullscreenQuadPositions);
-
         CommandList.SetGraphicsResourceSet(0, ResolvedColorResourceSet);
 
         //Draw fullscreen quad
         CommandList.Draw(4);
 
         CommandList.End();
+        
         GraphicsDevice.SubmitCommands(CommandList);
-
-        //Present the image
         GraphicsDevice.SwapBuffers(SwapChain);
+
+        Dirty = false;
     }
     
     public void Dispose()
@@ -502,5 +496,44 @@ public class RenderContext : IDisposable
         FullscreenQuadPositions = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(Unsafe.SizeOf<Vector2>() * fullscreenQuadPositions.Length), BufferUsage.VertexBuffer));
         Disposables.Add(FullscreenQuadPositions);
         GraphicsDevice.UpdateBuffer(FullscreenQuadPositions, 0, fullscreenQuadPositions);
+    }
+    
+    
+    public void LoadAutoTexture(AutoTextureItem[] autoTextureItems)
+    {
+        AutoTextureItems = autoTextureItems;
+        var autoTextureMasks = new AutoTextureMasks();
+        foreach (var item in AutoTextureItems)
+        {
+            var mask = new Vector4(item.R ? 1.0f : 0.0f, item.G ? 1.0f : 0.0f, item.B ? 1.0f : 0.0f, item.A ? 1.0f : 0.0f);
+            switch (item.Parameter)
+            {
+                case "Color":
+                    autoTextureMasks.Color = mask;
+                    break;
+                case "Metallic":
+                    autoTextureMasks.Metallic = mask;
+                    break;
+                case "Specular":
+                    autoTextureMasks.Specular = mask;
+                    break;
+                case "Roughness":
+                    autoTextureMasks.Roughness = mask;
+                    break;
+                case "AO":
+                    autoTextureMasks.AO = mask;
+                    break;
+                case "Normal":
+                    autoTextureMasks.Normal = mask;
+                    break;
+                case "Emissive":
+                    autoTextureMasks.Emissive = mask;
+                    break;
+                case "Alpha":
+                    autoTextureMasks.Alpha = mask;
+                    break;
+            }
+        }
+        GraphicsDevice.UpdateBuffer(AutoTextureBuffer, 0, autoTextureMasks);
     }
 }

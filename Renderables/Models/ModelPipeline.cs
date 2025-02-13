@@ -5,9 +5,11 @@ using Texture = UniversalUmap.Rendering.Renderables.Models.Materials.Texture;
 
 namespace UniversalUmap.Rendering.Renderables.Models;
 
+//cant be in Model like its done for Skybox etc since we will have multiple Model instances!
 public class ModelPipeline : IDisposable
 {
     private readonly GraphicsDevice GraphicsDevice;
+    
     public readonly Pipeline RegularPipeline;
     public readonly Pipeline TwoSidedPipeline;
 

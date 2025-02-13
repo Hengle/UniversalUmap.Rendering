@@ -44,10 +44,10 @@ public class Component : IRenderable
         GraphicsDevice.UpdateBuffer(TransformBuffer, 0, new InstanceInfo(FTransform.Identity));
         InstanceCount = 1;
         
-        Model = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, staticMesh, [staticMesh.LODs[0].Sections.Value[0].Material]));
+        Model = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, staticMesh, staticMesh.LODs[0]?.Sections?.Value[0]?.Material?.Load()));
     }
     
-    public Component(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials = null)
+    public Component(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials)
     {
         ModelPipeline = modelPipeline;
         GraphicsDevice = graphicsDevice;
@@ -60,8 +60,7 @@ public class Component : IRenderable
             if (overrideMaterials[i] != null)
                 OverrideMaterials[i] = ResourceCache.GetOrAdd(overrideMaterials[i].Outer!.Name, ()=> new Material(graphicsDevice, commandList, ModelPipeline.MaterialResourceLayout, overrideMaterials[i]));
         
-        staticMesh.TryConvert(out CStaticMesh convertedMesh);
-        Model = ResourceCache.GetOrAdd(staticMesh.Outer!.Name, ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, convertedMesh, staticMesh.Materials));
+        Model = ResourceCache.GetOrAdd(staticMesh.Outer!.Name, ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, staticMesh));
         
         TwoSided = component.Outer!.GetOrDefault<bool>("bMirrored") || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance");
         
