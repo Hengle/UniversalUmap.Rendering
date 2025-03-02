@@ -1,11 +1,9 @@
 ﻿using System.Numerics;
-using CUE4Parse_Conversion.Meshes;
 using CUE4Parse_Conversion.Meshes.PSK;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Objects.Core.Math;
 using UniversalUmap.Rendering.Camera;
-using UniversalUmap.Rendering.Input;
 using UniversalUmap.Rendering.Renderables.Models;
 using UniversalUmap.Rendering.Renderables.Models.Materials;
 using UniversalUmap.Rendering.Resources;
@@ -16,13 +14,12 @@ namespace UniversalUmap.Rendering.Renderables;
 public class Component : IRenderable
 {
     private readonly ModelPipeline ModelPipeline;
-    private readonly GraphicsDevice GraphicsDevice;
     private readonly CommandList CommandList;
     private readonly ResourceSet CameraResourceSet;
     private readonly Frustum Frustum;
 
     
-    private Models.Model Model;
+    private Model Model;
     private Material[] OverrideMaterials;
     private bool TwoSided;
     
@@ -30,55 +27,86 @@ public class Component : IRenderable
     private Vector3[][] Bounds;
     private uint InstanceCount;
 
-    public Component(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, CStaticMesh staticMesh)
+    public static bool TryCreate(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, CStaticMesh staticMesh, out Component componentInstance)
     {
-        ModelPipeline = modelPipeline;
-        GraphicsDevice = graphicsDevice;
-        CommandList = commandList;
-        CameraResourceSet = cameraResourceSet;
-        Frustum = frustum;
-        
-        OverrideMaterials = [];
-
-        TransformBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription(InstanceInfo.SizeOf(), BufferUsage.VertexBuffer));
-        GraphicsDevice.UpdateBuffer(TransformBuffer, 0, new InstanceInfo(FTransform.Identity));
-        InstanceCount = 1;
-        
-        Model = ResourceCache.GetOrAdd(staticMesh.GetHashCode().ToString(), ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, staticMesh, staticMesh.LODs[0]?.Sections?.Value[0]?.Material?.Load()));
-    }
-    
-    public Component(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials)
-    {
-        ModelPipeline = modelPipeline;
-        GraphicsDevice = graphicsDevice;
-        CommandList = commandList;
-        CameraResourceSet = cameraResourceSet;
-        Frustum = frustum;
-        
-        OverrideMaterials = new Material[overrideMaterials.Length];
-        for (var i = 0; i < OverrideMaterials.Length; i++)
-            if (overrideMaterials[i] != null)
-                OverrideMaterials[i] = ResourceCache.GetOrAdd(overrideMaterials[i].Outer!.Name, ()=> new Material(graphicsDevice, commandList, ModelPipeline.MaterialResourceLayout, overrideMaterials[i]));
-        
-        Model = ResourceCache.GetOrAdd(staticMesh.Outer!.Name, ()=> new Model(GraphicsDevice, CommandList, ModelPipeline, staticMesh));
-        
-        TwoSided = component.Outer!.GetOrDefault<bool>("bMirrored") || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance");
-        
-        var instanceInfos = new InstanceInfo[transforms.Length];
-        for (var i = 0; i < transforms.Length; i++)
+        componentInstance = null;
+        try
         {
-            TwoSided |= (transforms[i].Scale3D.X < 0 || transforms[i].Scale3D.Y < 0 || transforms[i].Scale3D.Z < 0);
-            instanceInfos[i] = new InstanceInfo(transforms[i]);
+            if (!Model.TryCreate(graphicsDevice, commandList, modelPipeline, staticMesh, out var createdModel))
+                return false;
+
+            var transformBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription(InstanceInfo.SizeOf(), BufferUsage.VertexBuffer));
+            graphicsDevice.UpdateBuffer(transformBuffer, 0, new InstanceInfo(FTransform.Identity));
+
+            componentInstance = new Component(frustum, modelPipeline, commandList, cameraResourceSet, createdModel, [], false, transformBuffer, 1);
         }
-        InstanceCount = (uint)transforms.Length;
-        TransformBuffer = GraphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(instanceInfos.Length * InstanceInfo.SizeOf()), BufferUsage.VertexBuffer));
-        GraphicsDevice.UpdateBuffer(TransformBuffer, 0, instanceInfos);
-        
-        Bounds = new Vector3[instanceInfos.Length][];
-        for (var i = 0; i < instanceInfos.Length; i++)
-            Bounds[i] = CalculateBounds(instanceInfos[i].Matrix, staticMesh.RenderData!.Bounds!);
+        catch (Exception ex)
+        {
+            return false;
+        }
+
+        return true;
     }
-    
+
+    public static bool TryCreate(Frustum frustum, ModelPipeline modelPipeline, GraphicsDevice graphicsDevice, CommandList commandList, ResourceSet cameraResourceSet, UObject component, UStaticMesh staticMesh, FTransform[] transforms, UObject[] overrideMaterials, out Component componentInstance)
+    {
+        componentInstance = null;
+        try
+        {
+            if (staticMesh.RenderData?.Bounds == null)
+                return false;
+
+            if (!Model.TryCreate(graphicsDevice, commandList, modelPipeline, staticMesh, out var createdModel))
+                return false;
+
+            var materials = new Material[overrideMaterials.Length];
+            for (var i = 0; i < materials.Length; i++)
+                if (overrideMaterials[i] != null)
+                    materials[i] = ResourceCache.GetOrAdd(overrideMaterials[i].Outer?.Name ?? "Unknown", () => new Material(graphicsDevice, commandList, modelPipeline.MaterialResourceLayout, overrideMaterials[i]));
+
+            bool twoSided = component.Outer?.GetOrDefault<bool>("bMirrored") == true || component.GetOrDefault<bool>("bDisallowMeshPaintPerInstance");
+
+            var instanceInfos = new InstanceInfo[transforms.Length];
+            for (var i = 0; i < transforms.Length; i++)
+            {
+                twoSided |= (transforms[i].Scale3D.X < 0 || transforms[i].Scale3D.Y < 0 || transforms[i].Scale3D.Z < 0);
+                instanceInfos[i] = new InstanceInfo(transforms[i]);
+            }
+
+            var transformBuffer = graphicsDevice.ResourceFactory.CreateBuffer(new BufferDescription((uint)(instanceInfos.Length * InstanceInfo.SizeOf()), BufferUsage.VertexBuffer));
+            graphicsDevice.UpdateBuffer(transformBuffer, 0, instanceInfos);
+
+            var bounds = new Vector3[instanceInfos.Length][];
+            for (var i = 0; i < instanceInfos.Length; i++)
+                bounds[i] = CalculateBounds(instanceInfos[i].Matrix, staticMesh.RenderData.Bounds);
+
+            componentInstance = new Component(frustum, modelPipeline, commandList, cameraResourceSet, createdModel, materials, twoSided, transformBuffer, (uint)transforms.Length)
+            {
+                Bounds = bounds
+            };
+        }
+        catch (Exception ex)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private Component(Frustum frustum, ModelPipeline modelPipeline, CommandList commandList, ResourceSet cameraResourceSet, Model model, Material[] overrideMaterials, bool twoSided, DeviceBuffer transformBuffer, uint instanceCount)
+    {
+        ModelPipeline = modelPipeline;
+        CommandList = commandList;
+        CameraResourceSet = cameraResourceSet;
+        Frustum = frustum;
+        Model = model;
+        OverrideMaterials = overrideMaterials;
+        TransformBuffer = transformBuffer;
+        TwoSided = twoSided;
+        InstanceCount = instanceCount;
+
+    }
+
     public void Render()
     {
         if (Bounds != null)
@@ -113,7 +141,7 @@ public class Component : IRenderable
             if (material != null)
             {
                 material.Render();
-                TwoSided = TwoSided || (material.TwoSided ?? false) || Model.Lods[0].IsTwoSided;
+                TwoSided = TwoSided || (material.TwoSided ?? false) || Model.Lods[Model.LodIndex].IsTwoSided;
             }
             
             CommandList.SetPipeline(TwoSided ? ModelPipeline.TwoSidedPipeline : ModelPipeline.RegularPipeline);
@@ -201,7 +229,7 @@ public class Component : IRenderable
         return true;
     }
     
-    private Vector3[] CalculateBounds(Matrix4x4 transform, FBoxSphereBounds originalBounds)
+    private static Vector3[] CalculateBounds(Matrix4x4 transform, FBoxSphereBounds originalBounds)
     {
         var instanceBounds = new Vector3[10]; //also save origin and sphere radius per instance
         instanceBounds[0] = Vector3.Transform(

@@ -126,12 +126,14 @@ public class RenderContext : IDisposable
     public void Load(UObject component, UStaticMesh mesh, FTransform[] transforms, UObject[] overrideMaterials)
     {
         Camera.JumpPosition = new Vector3(transforms[0].Translation.X, transforms[0].Translation.Z, transforms[0].Translation.Y);
-        AdditionQueue.Enqueue(new Component(Camera.Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, component, mesh, transforms, overrideMaterials));
+        if(Component.TryCreate(Camera.Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, component, mesh, transforms, overrideMaterials, out var createdComponent))
+            AdditionQueue.Enqueue(createdComponent);
     }
     
     public void Load(CStaticMesh mesh)
     {
-        AdditionQueue.Enqueue(new Component(Camera.Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, mesh));
+        if(Component.TryCreate(Camera.Frustum, ModelPipeline, GraphicsDevice, CommandList, Camera.CameraResourceSet, mesh, out var createdComponent))
+            AdditionQueue.Enqueue(createdComponent);
     }
 
     public void Clear()
