@@ -73,7 +73,7 @@ namespace UniversalUmap.Rendering.Renderables.Models.Materials
                 Usage = TextureUsage.Sampled | TextureUsage.GenerateMipmaps
             });
             
-            var skBitmap = texture.Decode(texture.PlatformData.Mips[0], RenderContext.TexturePlatform);
+            var skBitmap = texture.Decode(texture.PlatformData.Mips[0], RenderContext.TexturePlatform).ToSkBitmap();
             if(skBitmap != null)
                 graphicsDevice.UpdateTexture(VeldridTexture, skBitmap.Bytes, 0, 0, 0, (uint)skBitmap.Width, (uint)skBitmap.Height, 1, 0, 0);
             

@@ -49,7 +49,12 @@ public class Material : IDisposable
         UObject obj = material;
         while (obj != null)
         {
-            if (obj is UMaterialInstanceConstant parentInstance)
+            if (obj is UMaterialInstanceConstant parentInstanceConstant)
+            {
+                ReadUMaterialInstanceConstantParams(parentInstanceConstant, textures);
+                obj = parentInstanceConstant.Parent;
+            }
+            else if (obj is UMaterialInstance parentInstance)
             {
                 ReadUMaterialInstanceParams(parentInstance, textures);
                 obj = parentInstance.Parent;
@@ -66,7 +71,7 @@ public class Material : IDisposable
         TwoSided ??= false;
     }
 
-    private void ReadUMaterialInstanceParams(UMaterialInstanceConstant material, Dictionary<string, UTexture> textures)
+    private void ReadUMaterialInstanceConstantParams(UMaterialInstanceConstant material, Dictionary<string, UTexture> textures)
     {
         if (material.TryGetValue(out FStructFallback basePropertyOverrides, "BasePropertyOverrides"))
             if (basePropertyOverrides.TryGetValue(out bool twoSided, "TwoSided"))
@@ -75,6 +80,13 @@ public class Material : IDisposable
         foreach (var textureParam in material.TextureParameterValues)
             if (textureParam != null && textureParam.ParameterValue.TryLoad(out UTexture texture))
                 AddOrSkipProperty(textures, textureParam.Name, texture);
+    }
+
+    private void ReadUMaterialInstanceParams(UMaterialInstance material, Dictionary<string, UTexture> textures)
+    {
+        if (material.TryGetValue(out FStructFallback basePropertyOverrides, "BasePropertyOverrides"))
+            if (basePropertyOverrides.TryGetValue(out bool twoSided, "TwoSided"))
+                TwoSided ??= twoSided;
     }
 
     private void ReadUMaterialParams(UMaterial material, Dictionary<string, UTexture> textures, Dictionary<string, UTexture> referenceTextures)
