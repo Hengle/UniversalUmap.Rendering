@@ -62,9 +62,12 @@ public class Model : IRenderable
         try
         {
             // LODs
-            Lod.TryCreate(graphicsDevice, staticMesh.LODs[0], out var createdLod);
+            if (!Lod.TryCreate(graphicsDevice, staticMesh.LODs[0], out var createdLod))
+                return false;
 
-            var material = staticMesh.LODs[0].Sections.Value[0].Material.Load();
+            var material = staticMesh.LODs[0].Sections.Value[0].Material?.Load();
+            if (material == null)
+                return false;
 
             // Materials
             var materials = new[] { ResourceCache.GetOrAdd(material.Outer.Name, () => new Material(graphicsDevice, commandList, modelPipeline.MaterialResourceLayout, material)) };
