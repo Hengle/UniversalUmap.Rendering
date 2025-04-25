@@ -2,6 +2,7 @@
 using System.Reflection;
 using CUE4Parse_Conversion.Textures;
 using CUE4Parse.UE4.Assets.Exports.Texture;
+using SkiaSharp;
 using StbImageSharp;
 using Veldrid;
 using PixelFormat = Veldrid.PixelFormat;
@@ -60,6 +61,35 @@ namespace UniversalUmap.Rendering.Renderables.Models.Materials
 
         private void InitializeTextureFromUTexture(GraphicsDevice graphicsDevice, UTexture texture)
         {
+            // Decode the texture data to SKBitmap
+            var skBitmap = texture.Decode(RenderContext.TexturePlatform).ToSkBitmap();
+            if (skBitmap == null)
+                return;
+            
+            // Determine the PixelFormat based on SKBitmap ColorType
+            PixelFormat textureFormat = PixelFormat.R8G8B8A8UNorm;  // Default format
+            switch (skBitmap.ColorType)
+            {
+                case SKColorType.Rgba8888:
+                    textureFormat = texture.SRGB ? PixelFormat.R8G8B8A8UNormSRgb : PixelFormat.R8G8B8A8UNorm;
+                    break;
+
+                case SKColorType.Bgra8888:
+                    textureFormat = texture.SRGB ? PixelFormat.B8G8R8A8UNormSRgb : PixelFormat.B8G8R8A8UNorm;
+                    break;
+
+                case SKColorType.Gray8:
+                    textureFormat = PixelFormat.R8UNorm;
+                    break;
+
+                case SKColorType.Alpha8:
+                    textureFormat = PixelFormat.R8UNorm;
+                    break;
+                default:
+                    throw new NotImplementedException($"Unsupported SKColorType: {skBitmap.ColorType}");
+            }
+
+            // Create Veldrid Texture using the determined format
             VeldridTexture = graphicsDevice.ResourceFactory.CreateTexture(new TextureDescription
             {
                 Width = (uint)texture.PlatformData.SizeX,
@@ -67,16 +97,16 @@ namespace UniversalUmap.Rendering.Renderables.Models.Materials
                 Depth = 1,
                 MipLevels = (uint)Math.Min(6, texture.PlatformData.Mips.Length),
                 ArrayLayers = 1,
-                Format = texture.SRGB ? PixelFormat.R8G8B8A8UNormSRgb : PixelFormat.R8G8B8A8UNorm,
+                Format = textureFormat,
                 Type = TextureType.Texture2D,
                 SampleCount = TextureSampleCount.Count1,
                 Usage = TextureUsage.Sampled | TextureUsage.GenerateMipmaps
             });
+
+            // Update the texture with the SKBitmap bytes
+            graphicsDevice.UpdateTexture(VeldridTexture, skBitmap.Bytes, 0, 0, 0, (uint)skBitmap.Width, (uint)skBitmap.Height, 1, 0, 0);
             
-            var skBitmap = texture.Decode(texture.PlatformData.Mips[0], RenderContext.TexturePlatform).ToSkBitmap();
-            if(skBitmap != null)
-                graphicsDevice.UpdateTexture(VeldridTexture, skBitmap.Bytes, 0, 0, 0, (uint)skBitmap.Width, (uint)skBitmap.Height, 1, 0, 0);
-            
+            // Generate mipmaps
             var commandList = graphicsDevice.ResourceFactory.CreateCommandList();
             commandList.Begin();
             commandList.GenerateMipmaps(VeldridTexture);

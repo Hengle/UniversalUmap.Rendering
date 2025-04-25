@@ -67,11 +67,13 @@ float DistributionGGX(vec3 N, vec3 H, float roughness)
     return nom / denom;
 }
 // ----------------------------------------------------------------------------
+// Schlick approximation with k = alpha^2 / 2
 float GeometrySchlickGGX(float NdotV, float roughness)
 {
-    float r = (roughness + 1.0);
-    float k = (r*r) / 8.0;
+    // Calculate k = alpha^2 / 2
+    float k = (roughness * roughness) / 2.0;
 
+    // Compute Geometry term G1 using Schlick approximation
     float nom   = NdotV;
     float denom = NdotV * (1.0 - k) + k;
 

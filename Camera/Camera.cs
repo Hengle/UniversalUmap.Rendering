@@ -82,7 +82,7 @@ public class Camera : IDisposable
         
         //Mouse movement
         var inverseLookAtVector = Direction - Position;
-        var mouseDelta = InputTracker.MouseDelta * MouseSpeed * 0.01f;
+        var mouseDelta = InputTracker.MouseDelta * MouseSpeed * 0.005f;
         var right = Vector3.Normalize(Vector3.Cross(inverseLookAtVector, Up));
 
         //Clamp the vertical (Y) mouse delta to avoid flipping

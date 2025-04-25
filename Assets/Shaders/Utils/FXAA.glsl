@@ -1,50 +1,63 @@
-#define FXAA_SPAN_MAX 8.0
-#define FXAA_REDUCE_MUL   (1.0/FXAA_SPAN_MAX)
-#define FXAA_REDUCE_MIN   (1.0/128.0)
-#define FXAA_SUBPIX_SHIFT (1.0/4.0)
+#define FXAA_QUALITY_SUBPIX 0.75
+#define FXAA_EDGE_THRESHOLD 0.166
+#define FXAA_EDGE_THRESHOLD_MIN 0.0833
 
-vec3 fxaa(texture2D textureColor, sampler textureSampler, vec2 fragUV, vec2 invRes) {
-    vec4 uv = vec4(fragUV, fragUV + FXAA_SUBPIX_SHIFT * invRes);
-    
-    vec3 rgbNW = texture(sampler2D(textureColor, textureSampler), uv.zw).xyz;
-    vec3 rgbNE = texture(sampler2D(textureColor, textureSampler), uv.zw + vec2(1,0)*invRes.xy).xyz;
-    vec3 rgbSW = texture(sampler2D(textureColor, textureSampler), uv.zw + vec2(0,1)*invRes.xy).xyz;
-    vec3 rgbSE = texture(sampler2D(textureColor, textureSampler), uv.zw + vec2(1,1)*invRes.xy).xyz;
-    vec3 rgbM  = texture(sampler2D(textureColor, textureSampler), uv.xy).xyz;
+// FXAA 3.11 implementation
+vec3 fxaa(texture2D tex, sampler smp, vec2 uv, vec2 invRes) {
+    // Luma weights (sRGB)
+    const vec3 lumaCoeffs = vec3(0.299, 0.587, 0.114);
 
-    vec3 luma = vec3(0.299, 0.587, 0.114);
-    float lumaNW = dot(rgbNW, luma);
-    float lumaNE = dot(rgbNE, luma);
-    float lumaSW = dot(rgbSW, luma);
-    float lumaSE = dot(rgbSE, luma);
-    float lumaM  = dot(rgbM,  luma);
+    // Sample 3x3 neighborhood
+    float lumaM  = dot(texture(sampler2D(tex, smp), uv).rgb, lumaCoeffs);
+    float lumaN  = dot(texture(sampler2D(tex, smp), uv + vec2( 0.0, -1.0) * invRes).rgb, lumaCoeffs);
+    float lumaS  = dot(texture(sampler2D(tex, smp), uv + vec2( 0.0,  1.0) * invRes).rgb, lumaCoeffs);
+    float lumaE  = dot(texture(sampler2D(tex, smp), uv + vec2( 1.0,  0.0) * invRes).rgb, lumaCoeffs);
+    float lumaW  = dot(texture(sampler2D(tex, smp), uv + vec2(-1.0,  0.0) * invRes).rgb, lumaCoeffs);
 
-    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
-    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+    float lumaNE = dot(texture(sampler2D(tex, smp), uv + vec2( 1.0, -1.0) * invRes).rgb, lumaCoeffs);
+    float lumaSE = dot(texture(sampler2D(tex, smp), uv + vec2( 1.0,  1.0) * invRes).rgb, lumaCoeffs);
+    float lumaNW = dot(texture(sampler2D(tex, smp), uv + vec2(-1.0, -1.0) * invRes).rgb, lumaCoeffs);
+    float lumaSW = dot(texture(sampler2D(tex, smp), uv + vec2(-1.0,  1.0) * invRes).rgb, lumaCoeffs);
 
-    vec2 dir;
-    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
-    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+    // Compute local contrast
+    float lumaMin = min(lumaM, min(min(min(lumaN, lumaS), min(lumaE, lumaW)), min(min(lumaNE, lumaNW), min(lumaSE, lumaSW))));
+    float lumaMax = max(lumaM, max(max(max(lumaN, lumaS), max(lumaE, lumaW)), max(max(lumaNE, lumaNW), max(lumaSE, lumaSW))));
+    float lumaRange = lumaMax - lumaMin;
+
+    if (lumaRange < max(FXAA_EDGE_THRESHOLD_MIN, lumaMax * FXAA_EDGE_THRESHOLD))
+    return texture(sampler2D(tex, smp), uv).rgb;
+
+    // Edge direction estimation
+    float dirX = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    float dirY =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
 
     float dirReduce = max(
-    (lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL),
-    FXAA_REDUCE_MIN);
-    float rcpDirMin = 1.0/(min(abs(dir.x), abs(dir.y)) + dirReduce);
+        (lumaN + lumaS + lumaE + lumaW) * 0.25 * 0.25,
+        1.0 / 128.0
+    );
 
-    dir = min(vec2( FXAA_SPAN_MAX,  FXAA_SPAN_MAX),
-    max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),
-    dir * rcpDirMin)) * invRes.xy;
+    float rcpDirMin = 1.0 / (min(abs(dirX), abs(dirY)) + dirReduce);
 
-    vec3 rgbA = (1.0/2.0) * (
-    texture(sampler2D(textureColor, textureSampler), uv.xy + dir * (1.0/3.0 - 0.5)).xyz +
-    texture(sampler2D(textureColor, textureSampler), uv.xy + dir * (2.0/3.0 - 0.5)).xyz);
-    vec3 rgbB = rgbA * (1.0/2.0) + (1.0/4.0) * (
-    texture(sampler2D(textureColor, textureSampler), uv.xy + dir * (0.0/3.0 - 0.5)).xyz +
-    texture(sampler2D(textureColor, textureSampler), uv.xy + dir * (3.0/3.0 - 0.5)).xyz);
+    vec2 dir = clamp(vec2(dirX, dirY) * rcpDirMin,
+                     vec2(-8.0), vec2(8.0)) * invRes;
 
-    float lumaB = dot(rgbB, luma);
+    // Sample along edge direction
+    vec3 rgbA = 0.5 * (
+    texture(sampler2D(tex, smp), uv + dir * (1.0/3.0 - 0.5)).rgb +
+    texture(sampler2D(tex, smp), uv + dir * (2.0/3.0 - 0.5)).rgb
+    );
 
-    if((lumaB < lumaMin) || (lumaB > lumaMax)) return rgbA;
+    vec3 rgbB = 0.5 * rgbA + 0.25 * (
+    texture(sampler2D(tex, smp), uv + dir * (-0.5)).rgb +
+    texture(sampler2D(tex, smp), uv + dir * (0.5)).rgb
+    );
 
-    return rgbB;
+    // Subpixel aliasing removal
+    float lumaB = dot(rgbB, lumaCoeffs);
+    float lumaLocalAvg = 0.5 * (lumaMin + lumaMax);
+    float subPixel = clamp(abs(lumaB - lumaLocalAvg) / lumaRange, 0.0, 1.0);
+
+    subPixel = pow(subPixel, FXAA_QUALITY_SUBPIX);
+
+    return mix(rgbB, rgbA, subPixel);
 }
