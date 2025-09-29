@@ -3,3 +3,7 @@
 /bin
 /.idea
 *.spv
+
+*.dds binary
+*.hdr binary
+*.png binary

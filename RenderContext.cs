@@ -539,3 +539,4 @@ public class RenderContext : IDisposable
         GraphicsDevice.UpdateBuffer(AutoTextureBuffer, 0, autoTextureMasks);
     }
 }
+
