@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>UniversalUmap.Rendering</RootNamespace>
@@ -11,8 +11,8 @@
     <DebugType>none</DebugType>
   </PropertyGroup>
     <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
-    <PackageReference Include="ppy.Veldrid" Version="4.9.62-gca0239da6b" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="ppy.Veldrid" Version="4.9.69-ga405fe8484" />
     <PackageReference Include="ppy.Veldrid.SPIRV" Version="1.0.15-gfbb03d21c2" />
     <PackageReference Include="StbImageSharp" Version="2.30.15" />
     <PackageReference Include="Veldrid.SDL2" Version="4.9.0" />
