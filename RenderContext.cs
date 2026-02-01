@@ -149,55 +149,95 @@ public class RenderContext : IDisposable
         Dirty = true;
     }
     
-    private IntPtr CreateWindowSwapChain(IntPtr instanceHandle)
+    private unsafe IntPtr CreateWindowSwapChain(IntPtr instanceHandle)
+{
+    Window = new Sdl2Window(
+        "UniversalUmap 3D Viewer",
+        0,
+        0,
+        (int)Width,
+        (int)Height,
+        SDL_WindowFlags.OpenGL | SDL_WindowFlags.Resizable,
+        false)
     {
-        Window = new Sdl2Window(
-            "UniversalUmap 3D Viewer",
-            0,
-            0,
-            (int)Width,
-            (int)Height,
-            SDL_WindowFlags.OpenGL | SDL_WindowFlags.Resizable ,
-            false)
+        Visible = false,
+        WindowState = WindowState.Normal
+    };
+    NativeWindowsExtensions.MakeBorderless(Window.Handle);
+    
+    Window.MouseDown += @event =>
+    {
+        if (@event.MouseButton == MouseButton.Right)
         {
-            Visible = false,
-            WindowState = WindowState.Normal
-        };
-        NativeWindowsExtensions.MakeBorderless(Window.Handle);
-        
-        Window.MouseDown += @event =>
+            InputTracker.UpdateRightClickMousePosition();
+            Sdl2Native.SDL_SetRelativeMouseMode(true);
+        }
+    };
+    Window.MouseUp += @event =>
+    {
+        if (@event.MouseButton == MouseButton.Right)
         {
-            if (@event.MouseButton == MouseButton.Right)
-            {
-                InputTracker.UpdateRightClickMousePosition();
-                Sdl2Native.SDL_SetRelativeMouseMode(true);
-            }
-        };
-        Window.MouseUp += @event =>
-        {
-            if (@event.MouseButton == MouseButton.Right)
-            {
-                Sdl2Native.SDL_SetRelativeMouseMode(false);
-                Window.SetMousePosition(InputTracker.RightClickMousePosition);
-            }
-        };
+            Sdl2Native.SDL_SetRelativeMouseMode(false);
+            Window.SetMousePosition(InputTracker.RightClickMousePosition);
+        }
+    };
 
-        Window.Resized += OnResized;
+    Window.Resized += OnResized;
+    
+    // Platform-specific swapchain source
+    SwapchainSource swapchainSource;
+    if (OperatingSystem.IsWindows())
+    {
+        swapchainSource = SwapchainSource.CreateWin32(Window.Handle, instanceHandle);
+    }
+    else if (OperatingSystem.IsLinux())
+    {
+        SDL_SysWMinfo wmInfo = new SDL_SysWMinfo();
+        Sdl2Native.SDL_GetVersion(&wmInfo.version);
         
-        var swapchainSource = SwapchainSource.CreateWin32(Window.Handle, instanceHandle);
-        var swapchainDescription = new SwapchainDescription(
-            swapchainSource,
-            Width,
-            Height,
-            PixelFormat.R32Float,
-            Vsync,
-            false
-        );
-        SwapChain = GraphicsDevice.ResourceFactory.CreateSwapchain(ref swapchainDescription);
-        Disposables.Add(SwapChain);
-        return Window.Handle;
+        if (Sdl2Native.SDL_GetWMWindowInfo(Window.SdlWindowHandle, &wmInfo) == 0)
+        {
+            throw new PlatformNotSupportedException("Failed to get window info from SDL2");
+        }
+
+        switch (wmInfo.subsystem)
+        {
+            case SysWMType.X11:
+                var x11Info = *(X11WindowInfo*)&wmInfo.info;
+                swapchainSource = SwapchainSource.CreateXlib(
+                    x11Info.display,
+                    x11Info.Sdl2Window
+                );
+                break;
+            case SysWMType.Wayland:
+                var waylandInfo = *(WaylandWindowInfo*)&wmInfo.info;
+                swapchainSource = SwapchainSource.CreateWayland(
+                    waylandInfo.display,
+                    waylandInfo.surface
+                );
+                break;
+            default:
+                throw new PlatformNotSupportedException($"Unsupported window subsystem: {wmInfo.subsystem}");
+        }
+    }
+    else
+    {
+        throw new PlatformNotSupportedException("Unsupported platform");
     }
     
+    var swapchainDescription = new SwapchainDescription(
+        swapchainSource,
+        Width,
+        Height,
+        PixelFormat.R32Float,
+        Vsync,
+        false
+    );
+    SwapChain = GraphicsDevice.ResourceFactory.CreateSwapchain(ref swapchainDescription);
+    Disposables.Add(SwapChain);
+    return Window.Handle;
+}
+
     private void OnResized()
     {
         Width = (uint)Window.Width;
@@ -217,7 +257,15 @@ public class RenderContext : IDisposable
             PreferStandardClipSpaceYDirection = true,
             PreferDepthRangeZeroToOne = true
         };
-        GraphicsDevice = GraphicsDevice.CreateD3D11(options);
+        if (OperatingSystem.IsWindows())
+        {
+            GraphicsDevice = GraphicsDevice.CreateD3D11(options);
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            GraphicsDevice = GraphicsDevice.CreateVulkan(options);
+            // Or: return GraphicsDevice.CreateOpenGL(options);
+        }
         Disposables.Add(GraphicsDevice);
     }
     
